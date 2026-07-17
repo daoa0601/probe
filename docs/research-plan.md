@@ -11,11 +11,18 @@ passes fixed quality gates.
 
 ## Reference target
 
-The initial target is `google/gemma-4-26B-A4B-it-qat-q4_0-gguf`, file
-`gemma-4-26B_q4_0-it.gguf`, running through a pinned `llama.cpp` Metal build. Google describes this
-as a 26B-parameter mixture-of-experts model with about 4B active parameters per token. The full
-weights remain resident. Google's published Q4_0 loading estimate is roughly 14.4 GB with basic
-overhead and excludes KV-cache growth.
+The executable baseline is `ggml-org/gemma-4-26B-A4B-it-GGUF`, file
+`gemma-4-26B-A4B-it-Q4_0.gguf`, running through a pinned `llama.cpp` Metal build. It is converted
+from Google's Gemma 4 source models by the llama.cpp project. Google describes the architecture as a
+26B-parameter mixture-of-experts model with about 4B active parameters per token. The full weights
+remain resident. Google's published Q4_0 loading estimate is roughly 14.4 GB with basic overhead and
+excludes KV-cache growth.
+
+The initial smoke run found that Google's 2026-07-17 `gemma-4-E4B-it-qat-q4_0-gguf` artifact aborts
+current llama.cpp builds because its tokenizer contains duplicate entries. The failure is preserved
+under `results/`, and an independent user reported the
+[same assertion](https://huggingface.co/google/gemma-4-E4B-it-qat-q4_0-gguf/discussions/8). Revisit
+the official QAT GGUF after upstream repair; do not treat the current file as a runtime regression.
 
 Start with text-only workloads. Multimodal projection and audio/video support introduce different
 memory and runtime paths and should get their own experiments.

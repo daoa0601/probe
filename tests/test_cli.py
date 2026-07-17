@@ -26,7 +26,7 @@ def test_dry_run_prints_plan_without_requiring_runtime() -> None:
     assert result.exit_code == 0, result.output
     assert "3 tests" in result.output
     assert "llama-bench --output json" in result.output
-    assert "google/gemma-4-26B-A4B-it-qat-q4_0-gguf" in result.output
+    assert "ggml-org/gemma-4-26B-A4B-it-GGUF" in result.output
 
 
 def test_invalid_config_gets_concise_error(tmp_path: Path) -> None:

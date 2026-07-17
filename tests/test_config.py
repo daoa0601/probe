@@ -28,8 +28,8 @@ def test_baseline_compiles_to_expected_llama_bench_axes() -> None:
 
     assert config.estimated_test_cases == 3
     assert command[:3] == ["llama-bench", "--output", "json"]
-    assert _argument(command, "--hf-repo") == "google/gemma-4-26B-A4B-it-qat-q4_0-gguf"
-    assert _argument(command, "--hf-file") == "gemma-4-26B_q4_0-it.gguf"
+    assert _argument(command, "--hf-repo") == "ggml-org/gemma-4-26B-A4B-it-GGUF"
+    assert _argument(command, "--hf-file") == "gemma-4-26B-A4B-it-Q4_0.gguf"
     assert _argument(command, "--n-prompt") == "512,4096"
     assert _argument(command, "--n-gen") == "128"
     assert _argument(command, "--threads") == "10"

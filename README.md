@@ -4,11 +4,11 @@ Probe is an evidence-first lab for optimizing a locally hosted **Gemma 4** model
 The reference host is this MacBook Pro: M4 Pro, 48 GB unified memory, 10 performance CPU cores, 4
 efficiency CPU cores, and a 20-core GPU.
 
-The project starts with Google's instruction-tuned **Gemma 4 26B-A4B QAT Q4_0** model and
-`llama.cpp`'s Metal backend. The model activates about 4B parameters per token while keeping all 26B
-parameters resident, making it a useful target for studying throughput, memory pressure, long
-context, CPU/GPU placement, and speculative decoding. Google's estimate is about 14.4 GB to load
-Q4_0 weights with basic overhead, before the KV cache and application memory.
+The project starts with a llama.cpp-maintained **Gemma 4 26B-A4B Q4_0** conversion and `llama.cpp`'s
+Metal backend. The model activates about 4B parameters per token while keeping all 26B parameters
+resident, making it a useful target for studying throughput, memory pressure, long context, CPU/GPU
+placement, and speculative decoding. Google's estimate is about 14.4 GB to load Q4_0 weights with
+basic overhead, before the KV cache and application memory.
 
 The goal is not merely maximum tokens per second. Probe seeks the best configuration on this Mac
 under explicit constraints:
@@ -32,6 +32,8 @@ The first milestone is a reproducible throughput and memory baseline:
 
 See [the research plan](docs/research-plan.md) for the path from microbenchmarks to server latency,
 quality gates, long context, energy, concurrency, and Gemma 4 MTP speculative decoding.
+The first measured result is recorded in the
+[M4 Pro E4B smoke baseline](docs/baselines/2026-07-17-m4-pro-e4b-smoke.md).
 
 ## Quick start
 
@@ -101,6 +103,7 @@ tests/               hardware-independent unit and CLI tests
 - [Google's Gemma 4 model overview](https://ai.google.dev/gemma/docs/core)
 - [Official Gemma 4 26B-A4B instruction model](https://huggingface.co/google/gemma-4-26B-A4B-it)
 - [Official Gemma 4 26B-A4B QAT Q4_0 GGUF](https://huggingface.co/google/gemma-4-26B-A4B-it-qat-q4_0-gguf)
+- [llama.cpp Gemma 4 26B-A4B GGUF conversion](https://huggingface.co/ggml-org/gemma-4-26B-A4B-it-GGUF)
 - [`llama.cpp`](https://github.com/ggml-org/llama.cpp)
 
 Gemma 4 and its runtime support are evolving quickly. Probe pins every benchmarkable runtime and

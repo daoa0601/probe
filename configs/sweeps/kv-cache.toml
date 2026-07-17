@@ -5,10 +5,10 @@ output_dir = "results"
 tags = ["gemma4", "26b-a4b", "kv-cache", "metal"]
 
 [model]
-label = "Gemma 4 26B-A4B IT QAT"
-hf_repo = "google/gemma-4-26B-A4B-it-qat-q4_0-gguf"
-hf_file = "gemma-4-26B_q4_0-it.gguf"
-quantization = "QAT Q4_0"
+label = "Gemma 4 26B-A4B IT"
+hf_repo = "ggml-org/gemma-4-26B-A4B-it-GGUF"
+hf_file = "gemma-4-26B-A4B-it-Q4_0.gguf"
+quantization = "Q4_0"
 
 [runtime]
 binary = "llama-bench"
