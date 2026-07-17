@@ -28,11 +28,18 @@ make check
 - Change one factor family at a time; use a new config when the hypothesis changes.
 - Every result must retain the host fingerprint, llama.cpp build commit, model identity, complete
   command, and raw per-repetition samples.
+- Every candidate benchmark must retain its fsynced `trace.jsonl`; optimization sessions and
+  independent reviews use durable `.codex-subagents/` custody for exact prompts and raw outputs.
 - Do not edit prior result artifacts. Re-run into a new timestamped directory.
 - Do not commit model weights, runtime build trees, tokens, machine serial numbers, UUIDs, hostnames,
   or usernames.
 - Keep backends behind explicit adapters. llama.cpp/Metal is the first baseline; Ollama and MLX are
   comparison backends, not hidden fallbacks.
+- Do not call a result a baseline or use it for a speedup claim until the independent audit protocol
+  in `docs/optimization-audit-protocol.md` passes. Preserve audit disagreements and failures.
+- The optimizing agent cannot approve its own headline result. A separate read-only agent must read
+  final source, config, complete traces, and raw artifacts, then empirically replicate at least one
+  workload and re-test suspicious caching, substitution, parsing, or grader-specific behavior.
 
 ## Testing
 

@@ -28,6 +28,20 @@ def test_run_sweep_preserves_and_normalizes_output(tmp_path: Path) -> None:
     manifest = json.loads((artifact.directory / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["status"] == "succeeded"
     assert manifest["result_count"] == 1
+    trace = [
+        json.loads(line)
+        for line in (artifact.directory / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert [event["event"] for event in trace] == [
+        "artifact_created",
+        "host_captured",
+        "command_compiled",
+        "process_started",
+        "process_finished",
+        "output_parsed",
+        "run_finalized",
+    ]
+    assert trace[-1]["status"] == "succeeded"
 
 
 def test_failed_run_still_writes_diagnostic_artifact(tmp_path: Path) -> None:
@@ -43,6 +57,9 @@ def test_failed_run_still_writes_diagnostic_artifact(tmp_path: Path) -> None:
     assert manifest["status"] == "failed"
     assert manifest["return_code"] == 7
     assert (artifact_dir / "stderr.log").read_text(encoding="utf-8") == "fake diagnostic\n"
+    trace = (artifact_dir / "trace.jsonl").read_text(encoding="utf-8")
+    assert '"event": "run_finalized"' in trace
+    assert '"status": "failed"' in trace
 
 
 def test_peak_rss_parser_handles_macos_time_output() -> None:

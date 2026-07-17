@@ -26,3 +26,6 @@ data/
 .env
 .env.*
 !.env.example
+
+# Durable local multi-agent workflow custody; findings promoted to docs/ are tracked separately.
+.codex-subagents/

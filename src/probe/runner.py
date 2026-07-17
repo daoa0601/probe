@@ -79,10 +79,24 @@ def run_sweep(
     )
     artifact_dir = base_output.expanduser().resolve() / run_id
     artifact_dir.mkdir(parents=True, exist_ok=False)
+    trace_path = artifact_dir / "trace.jsonl"
+    _append_trace(
+        trace_path,
+        "artifact_created",
+        run_id=run_id,
+        config_source=str(config.source),
+    )
 
     host = capture_host().to_dict()
+    _append_trace(trace_path, "host_captured", host_file="host.json")
     command = build_command(config, binary=binary)
     execution_command = _with_memory_capture(command, config.runtime.capture_peak_memory)
+    _append_trace(
+        trace_path,
+        "command_compiled",
+        command=command,
+        memory_capture=execution_command != command,
+    )
     _write_text_atomic(artifact_dir / "command.txt", display_command(command) + "\n")
     _write_text_atomic(artifact_dir / "config.toml", config.source.read_text(encoding="utf-8"))
     _write_json_atomic(artifact_dir / "host.json", host)
@@ -91,6 +105,12 @@ def run_sweep(
     environment["LC_ALL"] = "C"
     monotonic_start = time.perf_counter()
     timed_out = False
+    _append_trace(
+        trace_path,
+        "process_started",
+        cwd=str(repository_root),
+        timeout_seconds=config.runtime.timeout_seconds,
+    )
     try:
         completed = subprocess.run(
             execution_command,
@@ -112,6 +132,14 @@ def run_sweep(
         stderr += f"\nprobe: benchmark timed out after {config.runtime.timeout_seconds}s\n"
     wall_seconds = time.perf_counter() - monotonic_start
     peak_rss_bytes = parse_peak_rss(stderr)
+    _append_trace(
+        trace_path,
+        "process_finished",
+        return_code=return_code,
+        timed_out=timed_out,
+        wall_seconds=wall_seconds,
+        peak_rss_bytes=peak_rss_bytes,
+    )
 
     _write_text_atomic(artifact_dir / "stdout.json", stdout)
     _write_text_atomic(artifact_dir / "stderr.log", stderr)
@@ -128,6 +156,13 @@ def run_sweep(
             parse_error = str(exc)
 
     status = "succeeded" if return_code == 0 and parse_error is None else "failed"
+    _append_trace(
+        trace_path,
+        "output_parsed",
+        status=status,
+        result_count=len(rows),
+        parse_error=parse_error,
+    )
     model_source = config.model.path or config.model.hf_repo
     execution = {
         "run_id": run_id,
@@ -178,9 +213,17 @@ def run_sweep(
             "stdout": "stdout.json",
             "stderr": "stderr.log",
             "results": "results.jsonl",
+            "trace": "trace.jsonl",
         },
     }
     _write_json_atomic(artifact_dir / "manifest.json", manifest)
+    _append_trace(
+        trace_path,
+        "run_finalized",
+        status=status,
+        manifest_file="manifest.json",
+        results_file="results.jsonl",
+    )
 
     if status != "succeeded":
         reason = parse_error or f"llama-bench exited with status {return_code}"
@@ -242,3 +285,11 @@ def _write_json_atomic(path: Path, value: object) -> None:
 def _write_jsonl_atomic(path: Path, records: list[dict[str, Any]]) -> None:
     content = "".join(json.dumps(record, sort_keys=True) + "\n" for record in records)
     _write_text_atomic(path, content)
+
+
+def _append_trace(path: Path, event: str, **fields: object) -> None:
+    record = {"at": datetime.now(UTC).isoformat(), "event": event, **fields}
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, sort_keys=True) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())

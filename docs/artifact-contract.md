@@ -11,6 +11,7 @@ Each `probe sweep` writes a new `results/<run-id>/` directory and never modifies
 | `stderr.log` | Runtime diagnostics and macOS `/usr/bin/time -l` telemetry. |
 | `results.jsonl` | One self-describing Probe record per llama-bench test row. |
 | `manifest.json` | Run status, timestamps, exit code, file map, and parse outcome. |
+| `trace.jsonl` | Fsynced chronological execution events from artifact creation through finalization. |
 
 Every JSONL record embeds:
 
@@ -28,3 +29,8 @@ UUIDs, provisioning identifiers, usernames, and computer names, Probe does not r
 Failed processes still receive config, command, host, stdout, stderr, and manifest files. A malformed
 or incomplete benchmark is evidence about the feasible parameter region, but it never becomes a
 successful `results.jsonl` record.
+
+`trace.jsonl` is written during execution rather than reconstructed afterward. Its ordered events
+are `artifact_created`, `host_captured`, `command_compiled`, `process_started`, `process_finished`,
+`output_parsed`, and `run_finalized`. An interrupted process therefore leaves the last durable event
+that actually happened.

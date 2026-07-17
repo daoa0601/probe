@@ -1,0 +1,18 @@
+{
+  "id": "tool-call-smoke-v1",
+  "prompt": "Return exactly one JSON object using this schema: {\"tool\": string, \"arguments\": {\"a\": integer, \"b\": integer}}. Call the multiply tool for a=17 and b=19. Output no prose and no markdown.",
+  "expected": {
+    "tool": "multiply",
+    "arguments": {
+      "a": 17,
+      "b": 19
+    }
+  },
+  "generation": {
+    "context_size": 2048,
+    "max_tokens": 80,
+    "temperature": 0,
+    "seed": 42,
+    "reasoning": false
+  }
+}
