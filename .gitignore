@@ -1,0 +1,28 @@
+.DS_Store
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Local runtimes and model weights are large and reproducible from their manifests.
+.cache/
+models/*
+!models/README.md
+*.gguf
+*.safetensors
+
+# Benchmark output is append-only local evidence, not source code.
+results/
+reports/
+data/
+
+# Local credentials and overrides.
+.env
+.env.*
+!.env.example

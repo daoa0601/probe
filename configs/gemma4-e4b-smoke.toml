@@ -1,0 +1,37 @@
+[experiment]
+name = "gemma4-e4b-smoke"
+description = "Cheap end-to-end validation before downloading or testing the 26B-A4B target."
+output_dir = "results"
+tags = ["gemma4", "smoke", "metal"]
+
+[model]
+label = "Gemma 4 E4B IT QAT"
+hf_repo = "google/gemma-4-E4B-it-qat-q4_0-gguf"
+hf_file = "gemma-4-E4B_q4_0-it.gguf"
+quantization = "QAT Q4_0"
+
+[runtime]
+binary = "llama-bench"
+repetitions = 2
+delay_seconds = 0
+warmup = true
+offline = false
+capture_peak_memory = true
+timeout_seconds = 3600
+
+[workload]
+prompt_tokens = [512]
+generation_tokens = [64]
+combined = []
+
+[matrix]
+batch_sizes = [512]
+ubatch_sizes = [256]
+threads = [10]
+gpu_layers = [99]
+cpu_moe_layers = [0]
+flash_attention = ["on"]
+cache_type_k = ["f16"]
+cache_type_v = ["f16"]
+mmap = [true]
+no_kv_offload = [false]
