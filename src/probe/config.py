@@ -90,6 +90,7 @@ class Matrix:
 @dataclass(frozen=True)
 class Promotion:
     require_clean_repository: bool
+    correctness_binary: str
     correctness_contract: Path | None
     replication_tolerance_percent: float | None
     max_load_1m: float | None
@@ -147,6 +148,7 @@ _MATRIX_KEYS = {
 }
 _PROMOTION_KEYS = {
     "require_clean_repository",
+    "correctness_binary",
     "correctness_contract",
     "replication_tolerance_percent",
     "max_load_1m",
@@ -284,6 +286,9 @@ def load_config(path: Path) -> ProbeConfig:
             "require_clean_repository",
             False,
         ),
+        correctness_binary=os.path.expandvars(
+            _string(promotion_raw, "correctness_binary", "llama-cli")
+        ),
         correctness_contract=correctness_contract,
         replication_tolerance_percent=_optional_number(
             promotion_raw,
@@ -313,6 +318,11 @@ def load_config(path: Path) -> ProbeConfig:
             missing.append("[promotion].replication_tolerance_percent")
         if missing:
             raise ConfigError("promotion-eligible configs require " + ", ".join(missing))
+        if matrix.combination_count != 1:
+            raise ConfigError(
+                "promotion-eligible configs require exactly one matrix combination so the "
+                "correctness runtime is unambiguous"
+            )
 
     return ProbeConfig(
         source=source,

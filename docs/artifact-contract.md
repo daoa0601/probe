@@ -13,6 +13,10 @@ Each `probe sweep` writes a new `results/<run-id>/` directory and never modifies
 | `environment-end.json` | The same environment snapshot immediately after inference. |
 | `promotion.json` | Predeclared replication tolerance and correctness-contract digest, when configured. |
 | `correctness-contract.json` | Byte-for-byte copy of the precommitted correctness input, when configured. |
+| `correctness-command.txt` | Exact deterministic `llama-cli` command used for the promotion check. |
+| `correctness-stdout.json` | Untouched assistant output from the deterministic check. |
+| `correctness-stderr.log` | Untouched diagnostics from the deterministic check. |
+| `correctness-result.json` | Parse status, expected and observed values, exact equality, exit code, and timing. |
 | `stdout.json` | Unmodified structured llama-bench output. |
 | `stderr.log` | Runtime diagnostics and macOS `/usr/bin/time -l` telemetry. |
 | `results.jsonl` | One self-describing Probe record per llama-bench test row. |
@@ -39,9 +43,9 @@ successful `results.jsonl` record.
 
 `trace.jsonl` is written during execution rather than reconstructed afterward. Its ordered events
 cover artifact creation, source and model capture, an optional promotion contract, host and start
-environment capture, command compilation, process start and finish, end environment capture, output
-parsing, and finalization. An interrupted process therefore leaves the last durable event that
-actually happened.
+environment capture, benchmark command compilation and execution, deterministic correctness start
+and finish, end environment capture, output parsing, and finalization. An interrupted process
+therefore leaves the last durable event that actually happened.
 
 `seal.json` is written last. It hashes the final manifest and final trace as well as the config,
 source, model, environment, command, stdout, stderr, and normalized results. The seal does not claim

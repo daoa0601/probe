@@ -113,7 +113,9 @@ The promotion-eligible 26B config is `configs/gemma4-26b-a4b-baseline-v2.toml`. 
 creation, Probe hashes the exact local model, checks its committed size and digest, captures Git
 HEAD/status/diff, rejects a dirty or unavailable repository, captures the host environment, rejects
 start load above the configured ceiling, and requires AC power when declared. This preflight is a
-guardrail, not a quality verdict; correctness execution and independent audit are still mandatory.
+guardrail, not a quality verdict. The runner then executes the copied correctness contract with the
+pinned companion `llama-cli`, requires exact parsed equality, and seals its command and raw streams
+alongside throughput evidence. Independent audit remains mandatory.
 
 ## Durable custody
 

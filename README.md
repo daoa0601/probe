@@ -73,8 +73,8 @@ uv run probe sweep configs/gemma4-26b-a4b-baseline.toml
 The `baseline-v2` config is the only current promotion-eligible 26B contract. It uses a local model
 path so Probe can verify the full file before execution, rejects dirty source or a busy/unplugged
 host, locks a 5% independent-replication tolerance, copies the correctness contract into the
-artifact, and seals every finalized file. Run it only after the model path is exported and the
-worktree is clean.
+artifact, executes it as an exact parsed-output gate, and seals every finalized file. Run it only
+after the model path is exported and the worktree is clean.
 
 Compare every artifact beneath `results/`, or select a comparable workload:
 

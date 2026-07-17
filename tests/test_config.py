@@ -51,6 +51,7 @@ def test_promotion_baseline_locks_model_contract_and_tolerance(
         "d208665ab1cd3a69f7a9a4bc59430e8448c8093d9b06334f566ac59d6d504a03"
     )
     assert config.promotion.require_clean_repository is True
+    assert config.promotion.correctness_binary == "llama-cli"
     assert config.promotion.correctness_contract == Path(
         "workloads/correctness/tool-call-smoke.json"
     )

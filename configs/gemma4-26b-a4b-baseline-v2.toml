@@ -39,6 +39,7 @@ no_kv_offload = [false]
 
 [promotion]
 require_clean_repository = true
+correctness_binary = "llama-cli"
 correctness_contract = "workloads/correctness/tool-call-smoke.json"
 replication_tolerance_percent = 5.0
 max_load_1m = 8.0
