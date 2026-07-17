@@ -76,6 +76,8 @@ def run_sweep(
     repository_root = (root or project_root()).resolve()
     binary = resolve_binary(config, root=repository_root)
     try:
+        if config.promotion.max_load_1m is not None or config.promotion.require_ac_power:
+            _validate_environment_for_promotion(config, capture_environment())
         model_identity = capture_model_identity(config.model, repository_root)
         promotion_evidence, correctness_contract = _prepare_promotion_evidence(
             config,
