@@ -34,8 +34,9 @@ See [the research plan](docs/research-plan.md) for the path from microbenchmarks
 quality gates, long context, energy, concurrency, and Gemma 4 MTP speculative decoding.
 The first measured result is recorded in the
 [M4 Pro E4B smoke baseline](docs/baselines/2026-07-17-m4-pro-e4b-smoke.md).
-The initial 26B-A4B result remains an
-[audit-pending baseline candidate](docs/baselines/2026-07-17-m4-pro-26b-a4b-baseline.md).
+The initial 26B-A4B result is a
+[conditional baseline candidate](docs/baselines/2026-07-17-m4-pro-26b-a4b-baseline.md); its
+independent audit found valid inference but blocked promotion on provenance and repeatability.
 All promoted results follow the
 [optimization and independent-audit protocol](docs/optimization-audit-protocol.md).
 

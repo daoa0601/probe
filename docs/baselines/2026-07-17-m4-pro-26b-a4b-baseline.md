@@ -1,10 +1,11 @@
 # M4 Pro Gemma 4 26B-A4B baseline candidate — 2026-07-17
 
-Status: **candidate; independent audit pending**.
+Status: **conditional candidate; not promoted**.
 
-This result cannot anchor speedup claims until the audit in
-`docs/optimization-audit-protocol.md` reaches PASS. All repetitions, including the late-run
-slowdown, are retained.
+This result cannot anchor speedup claims. The independent audit validated the model, runtime,
+token work, raw samples, aggregate parsing, and deterministic output, but found that this run does
+not satisfy the promotion invariant in `docs/optimization-audit-protocol.md`. All repetitions,
+including the late-run slowdown, remain part of the evidence.
 
 ## Provenance
 
@@ -12,7 +13,7 @@ slowdown, are retained.
 | --- | --- |
 | Host | Apple M4 Pro, 48 GiB unified memory, 10 performance + 4 efficiency CPU cores, 20-core GPU |
 | OS | macOS 27.0, arm64 |
-| Probe source used by runner | Git commit `2dca889` |
+| Probe execution state | Uncommitted runner bytes; reconstructed as the later `2dca889`, but no run-start Git status or diff was preserved |
 | Runtime | llama.cpp `86d86ed4` with Metal and Accelerate |
 | Model | `ggml-org/gemma-4-26B-A4B-it-GGUF` |
 | Model repository commit | `3d3dca2094ff8112005fd10fc7a8e30cf4f45b56` |
@@ -40,16 +41,18 @@ does not include all Metal/unified-memory residency and must not be described as
 
 ## Correctness check
 
-The exact deterministic contract is `workloads/correctness/tool-call-smoke.json`. With temperature
-zero, seed 42, reasoning disabled, a 2K context, the same verified model blob, Metal offload, and
-flash attention, the model returned:
+The deterministic contract is `workloads/correctness/tool-call-smoke.json`. With temperature zero,
+seed 42, reasoning disabled, a 2K context, the same verified model blob, Metal offload, and flash
+attention, the model returned:
 
 ```json
 {"tool": "multiply", "arguments": {"a": 17, "b": 19}}
 ```
 
-The parsed object exactly matched the locked expected value. The earlier exploratory prompt and its
-alternate schema are preserved in the workflow evidence instead of being silently discarded.
+The parsed object exactly matched the expected value in both the primary check and the auditor's
+independent replay. However, the contract file was created after the throughput run, so it was not
+precommitted for this candidate. The earlier exploratory prompt and its alternate schema are
+preserved in the workflow evidence instead of being silently discarded.
 
 ## Primary validity review
 
@@ -77,7 +80,48 @@ alternate schema are preserved in the workflow evidence instead of being silentl
 
 ## Audit findings
 
-Independent audit pending. The auditor is required to read final source, configuration, workflow
-ledger, raw artifact, and trace; verify model/runtime identity; run at least one offline empirical
-replication; investigate the late-run degradation and memory-accounting gap; and publish a
-PASS/CONDITIONAL/FAIL verdict here without deleting primary samples.
+Verdict: **CONDITIONAL — do not promote this candidate to an audited or headline baseline.**
+
+The independent agent read the final Probe and llama-bench source end to end, reviewed every
+primary artifact and custody record, hashed the complete model file, recomputed all aggregates,
+replayed the correctness contract, and ran ten fresh offline repetitions for the long-prompt and
+generation workloads on the same M4 Pro.
+
+| Workload | Primary mean | Independent mean | Difference | Independent samples |
+| --- | ---: | ---: | ---: | --- |
+| `pp4096` | 544.52 tok/s | 609.00 tok/s | +11.84% | 591.243, 598.690, 606.874, 609.107, 613.942, 612.011, 614.592, 615.747, 612.443, 615.353 |
+| `tg128` | 43.11 tok/s | 50.60 tok/s | +17.37% | 48.7915, 49.9460, 48.7575, 54.0000, 47.7879, 51.8684, 52.1753, 50.9227, 52.0771, 49.6684 |
+
+The primary fifth-sample collapse did not recur: the replica's last five samples were 1.67% faster
+than its first five for `pp4096` and 2.98% faster for `tg128`. Background load, swap/page residency,
+or unmeasured DVFS remain plausible causes; neither run captured GPU clocks or temperature.
+
+Promotion-blocking findings:
+
+1. **High — incomplete source provenance.** The run began at 18:55:33, before commit `2dca889`
+   existed at 19:10:23. Source mtime, the pre-run bytecode header, and emitted trace behavior strongly
+   match that later commit, but no run-start Git status or dirty diff was preserved.
+2. **High — undeclared replication disagreement.** The independent means were 11.84% and 17.37%
+   faster, and no acceptance tolerance had been locked before execution.
+3. **Medium — controls were not precommitted.** The correctness contract and primary environmental
+   observations were recorded after the throughput run. The independent exact-output replay passed,
+   so this is a custody failure rather than evidence of an incorrect response.
+4. **Low — artifact immutability was policy-only.** Artifact files were internally consistent, but
+   the manifest did not contain per-file digests or an external timestamp authority.
+
+The anti-gaming review passed for cached or replayed output, skipped token work, prompt/context cache
+reuse, workload substitution, model mismatch, invalid correctness output, sample cherry-picking,
+aggregate parsing, misleading memory claims, and test-specific branches. The auditor observed no
+repository, cache, model, power-setting, or Git writes.
+
+Memory remains intentionally unscored. The independent clean run reported 12.62 GiB peak process
+RSS, while a diagnostic run observed about 13.0 GiB resident with roughly 12.2 GiB in clean mapped
+model pages and a 623 MiB physical footprint. These incompatible accounting views confirm that
+neither the primary 5.21 GiB RSS nor the replica's RSS is a total Metal/unified-memory high-water
+mark.
+
+Remaining risks include uncontrolled page residency and competing processes, unknown GPU
+temperature/clocks/power, no independent `pp512` replay, no cold-load measurement, a single narrow
+correctness contract, and no cryptographically sealed primary artifact. A fresh run with committed
+source and contract, start-of-run state capture, artifact hashes, and a predeclared replication
+tolerance is required for promotion.
