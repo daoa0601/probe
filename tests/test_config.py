@@ -36,6 +36,56 @@ def test_baseline_compiles_to_expected_llama_bench_axes() -> None:
     assert _argument(command, "--flash-attn") == "on"
 
 
+def test_promotion_baseline_locks_model_contract_and_tolerance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model_path = "/tmp/probe-gemma4-fixture.gguf"
+    monkeypatch.setenv("PROBE_GEMMA4_26B_MODEL", model_path)
+
+    config = load_config(ROOT / "configs" / "gemma4-26b-a4b-baseline-v2.toml")
+    command = build_command(config)
+
+    assert config.model.path == model_path
+    assert config.model.size_bytes == 14_618_145_824
+    assert config.model.sha256 == (
+        "d208665ab1cd3a69f7a9a4bc59430e8448c8093d9b06334f566ac59d6d504a03"
+    )
+    assert config.promotion.require_clean_repository is True
+    assert config.promotion.correctness_contract == Path(
+        "workloads/correctness/tool-call-smoke.json"
+    )
+    assert config.promotion.replication_tolerance_percent == 5.0
+    assert config.promotion.max_load_1m == 8.0
+    assert config.promotion.require_ac_power is True
+    assert _argument(command, "--model") == model_path
+    assert "--offline" in command
+
+
+def test_promotion_config_requires_complete_precommit_contract(tmp_path: Path) -> None:
+    config_path = _write_config(
+        tmp_path,
+        """
+[experiment]
+name = "incomplete-promotion"
+
+[model]
+path = "model.gguf"
+
+[runtime]
+
+[workload]
+
+[matrix]
+
+[promotion]
+require_clean_repository = true
+""",
+    )
+
+    with pytest.raises(ConfigError, match="promotion-eligible configs require"):
+        load_config(config_path)
+
+
 def test_combined_workloads_become_repeated_pg_flags(tmp_path: Path) -> None:
     config_path = _write_config(
         tmp_path,

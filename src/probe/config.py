@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 import shlex
 import tomllib
 from dataclasses import dataclass
@@ -28,6 +29,8 @@ class Model:
     hf_repo: str | None
     hf_file: str | None
     quantization: str
+    sha256: str | None
+    size_bytes: int | None
 
 
 @dataclass(frozen=True)
@@ -85,6 +88,15 @@ class Matrix:
 
 
 @dataclass(frozen=True)
+class Promotion:
+    require_clean_repository: bool
+    correctness_contract: Path | None
+    replication_tolerance_percent: float | None
+    max_load_1m: float | None
+    require_ac_power: bool
+
+
+@dataclass(frozen=True)
 class ProbeConfig:
     source: Path
     experiment: Experiment
@@ -92,15 +104,24 @@ class ProbeConfig:
     runtime: Runtime
     workload: Workload
     matrix: Matrix
+    promotion: Promotion
 
     @property
     def estimated_test_cases(self) -> int:
         return self.workload.test_count * self.matrix.combination_count
 
 
-_TOP_LEVEL_KEYS = {"experiment", "model", "runtime", "workload", "matrix"}
+_TOP_LEVEL_KEYS = {"experiment", "model", "runtime", "workload", "matrix", "promotion"}
 _EXPERIMENT_KEYS = {"name", "description", "output_dir", "tags"}
-_MODEL_KEYS = {"label", "path", "hf_repo", "hf_file", "quantization"}
+_MODEL_KEYS = {
+    "label",
+    "path",
+    "hf_repo",
+    "hf_file",
+    "quantization",
+    "sha256",
+    "size_bytes",
+}
 _RUNTIME_KEYS = {
     "binary",
     "repetitions",
@@ -124,6 +145,13 @@ _MATRIX_KEYS = {
     "mmap",
     "no_kv_offload",
 }
+_PROMOTION_KEYS = {
+    "require_clean_repository",
+    "correctness_contract",
+    "replication_tolerance_percent",
+    "max_load_1m",
+    "require_ac_power",
+}
 _FLASH_ATTENTION_VALUES = {"on", "off", "auto"}
 _KV_CACHE_TYPES = {"f16", "bf16", "q8_0", "q4_0", "q4_1", "q5_0", "q5_1", "iq4_nl"}
 
@@ -146,12 +174,14 @@ def load_config(path: Path) -> ProbeConfig:
     runtime_raw = _table(raw, "runtime")
     workload_raw = _table(raw, "workload")
     matrix_raw = _table(raw, "matrix")
+    promotion_raw = _optional_table(raw, "promotion")
 
     _reject_unknown(experiment_raw, _EXPERIMENT_KEYS, "[experiment]")
     _reject_unknown(model_raw, _MODEL_KEYS, "[model]")
     _reject_unknown(runtime_raw, _RUNTIME_KEYS, "[runtime]")
     _reject_unknown(workload_raw, _WORKLOAD_KEYS, "[workload]")
     _reject_unknown(matrix_raw, _MATRIX_KEYS, "[matrix]")
+    _reject_unknown(promotion_raw, _PROMOTION_KEYS, "[promotion]")
 
     experiment = Experiment(
         name=_required_string(experiment_raw, "name", "[experiment]"),
@@ -175,6 +205,8 @@ def load_config(path: Path) -> ProbeConfig:
         hf_repo=hf_repo,
         hf_file=hf_file,
         quantization=_string(model_raw, "quantization", "unknown"),
+        sha256=_optional_sha256(model_raw, "sha256"),
+        size_bytes=_optional_integer(model_raw, "size_bytes", minimum=1),
     )
 
     runtime = Runtime(
@@ -240,6 +272,48 @@ def load_config(path: Path) -> ProbeConfig:
             "split incompatible values into separate configs"
         )
 
+    contract_value = _optional_string(promotion_raw, "correctness_contract")
+    correctness_contract = (
+        Path(os.path.expandvars(os.path.expanduser(contract_value)))
+        if contract_value is not None
+        else None
+    )
+    promotion = Promotion(
+        require_clean_repository=_boolean(
+            promotion_raw,
+            "require_clean_repository",
+            False,
+        ),
+        correctness_contract=correctness_contract,
+        replication_tolerance_percent=_optional_number(
+            promotion_raw,
+            "replication_tolerance_percent",
+            minimum_exclusive=0,
+            maximum=100,
+        ),
+        max_load_1m=_optional_number(
+            promotion_raw,
+            "max_load_1m",
+            minimum_exclusive=0,
+            maximum=10_000,
+        ),
+        require_ac_power=_boolean(promotion_raw, "require_ac_power", False),
+    )
+    if promotion.require_clean_repository:
+        missing: list[str] = []
+        if model.path is None:
+            missing.append("a local [model].path")
+        if model.sha256 is None:
+            missing.append("[model].sha256")
+        if model.size_bytes is None:
+            missing.append("[model].size_bytes")
+        if promotion.correctness_contract is None:
+            missing.append("[promotion].correctness_contract")
+        if promotion.replication_tolerance_percent is None:
+            missing.append("[promotion].replication_tolerance_percent")
+        if missing:
+            raise ConfigError("promotion-eligible configs require " + ", ".join(missing))
+
     return ProbeConfig(
         source=source,
         experiment=experiment,
@@ -247,6 +321,7 @@ def load_config(path: Path) -> ProbeConfig:
         runtime=runtime,
         workload=workload,
         matrix=matrix,
+        promotion=promotion,
     )
 
 
@@ -304,6 +379,13 @@ def _table(raw: dict[str, Any], key: str) -> dict[str, Any]:
     return value
 
 
+def _optional_table(raw: dict[str, Any], key: str) -> dict[str, Any]:
+    value = raw.get(key, {})
+    if not isinstance(value, dict):
+        raise ConfigError(f"invalid [{key}] section")
+    return value
+
+
 def _reject_unknown(raw: dict[str, Any], allowed: set[str], location: str) -> None:
     unknown = sorted(set(raw) - allowed)
     if unknown:
@@ -338,6 +420,43 @@ def _integer(raw: dict[str, Any], key: str, default: int, *, minimum: int) -> in
     if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
         raise ConfigError(f"{key} must be an integer >= {minimum}")
     return value
+
+
+def _optional_integer(raw: dict[str, Any], key: str, *, minimum: int) -> int | None:
+    value = raw.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+        raise ConfigError(f"{key} must be an integer >= {minimum}")
+    return value
+
+
+def _optional_number(
+    raw: dict[str, Any],
+    key: str,
+    *,
+    minimum_exclusive: float,
+    maximum: float,
+) -> float | None:
+    value = raw.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise ConfigError(f"{key} must be a number")
+    number = float(value)
+    if not math.isfinite(number) or not minimum_exclusive < number <= maximum:
+        raise ConfigError(f"{key} must be > {minimum_exclusive} and <= {maximum}")
+    return number
+
+
+def _optional_sha256(raw: dict[str, Any], key: str) -> str | None:
+    value = _optional_string(raw, key)
+    if value is None:
+        return None
+    normalized = value.lower()
+    if re.fullmatch(r"[0-9a-f]{64}", normalized) is None:
+        raise ConfigError(f"{key} must be a 64-character hexadecimal SHA-256")
+    return normalized
 
 
 def _boolean(raw: dict[str, Any], key: str, default: bool) -> bool:

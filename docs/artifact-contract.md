@@ -6,12 +6,19 @@ Each `probe sweep` writes a new `results/<run-id>/` directory and never modifies
 | --- | --- |
 | `config.toml` | Exact experiment definition copied before execution. |
 | `command.txt` | Shell-escaped, token-free command passed to llama-bench. |
+| `source.json` | Run-start Git HEAD, branch, clean/dirty status, binary diff, and untracked-file digests. |
+| `model.json` | Resolved model path, byte size, SHA-256, and expected-value verification. |
 | `host.json` | Privacy-safe performance-relevant host fingerprint. |
+| `environment-start.json` | Start load, power, thermal warnings, swap, memory pressure, and sanitized top processes. |
+| `environment-end.json` | The same environment snapshot immediately after inference. |
+| `promotion.json` | Predeclared replication tolerance and correctness-contract digest, when configured. |
+| `correctness-contract.json` | Byte-for-byte copy of the precommitted correctness input, when configured. |
 | `stdout.json` | Unmodified structured llama-bench output. |
 | `stderr.log` | Runtime diagnostics and macOS `/usr/bin/time -l` telemetry. |
 | `results.jsonl` | One self-describing Probe record per llama-bench test row. |
 | `manifest.json` | Run status, timestamps, exit code, file map, and parse outcome. |
 | `trace.jsonl` | Fsynced chronological execution events from artifact creation through finalization. |
+| `seal.json` | Detached byte size and SHA-256 for every other finalized artifact file. |
 
 Every JSONL record embeds:
 
@@ -31,6 +38,14 @@ or incomplete benchmark is evidence about the feasible parameter region, but it 
 successful `results.jsonl` record.
 
 `trace.jsonl` is written during execution rather than reconstructed afterward. Its ordered events
-are `artifact_created`, `host_captured`, `command_compiled`, `process_started`, `process_finished`,
-`output_parsed`, and `run_finalized`. An interrupted process therefore leaves the last durable event
-that actually happened.
+cover artifact creation, source and model capture, an optional promotion contract, host and start
+environment capture, command compilation, process start and finish, end environment capture, output
+parsing, and finalization. An interrupted process therefore leaves the last durable event that
+actually happened.
+
+`seal.json` is written last. It hashes the final manifest and final trace as well as the config,
+source, model, environment, command, stdout, stderr, and normalized results. The seal does not claim
+an external timestamp authority; a tracked report records the seal digest so later mutation becomes
+detectable. Adding, removing, or changing a file after sealing invalidates promotion eligibility.
+Verify an artifact before analysis with `uv run probe verify-artifact results/<run-id>`; the command
+also prints the seal's own digest for inclusion in the tracked report and audit ledger.

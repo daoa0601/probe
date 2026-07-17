@@ -30,6 +30,9 @@ make check
   command, and raw per-repetition samples.
 - Every candidate benchmark must retain its fsynced `trace.jsonl`; optimization sessions and
   independent reviews use durable `.codex-subagents/` custody for exact prompts and raw outputs.
+- Promotion-eligible configs require clean committed source, exact local model bytes, a precommitted
+  correctness contract, start-environment gates, a declared replication tolerance, and a final
+  `seal.json` covering every other artifact file.
 - Do not edit prior result artifacts. Re-run into a new timestamped directory.
 - Do not commit model weights, runtime build trees, tokens, machine serial numbers, UUIDs, hostnames,
   or usernames.

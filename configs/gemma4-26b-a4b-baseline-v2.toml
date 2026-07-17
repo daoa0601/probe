@@ -1,0 +1,45 @@
+[experiment]
+name = "gemma4-26b-a4b-baseline-v2"
+description = "Promotion-eligible steady-state baseline with precommitted audit controls."
+output_dir = "results"
+tags = ["gemma4", "26b-a4b", "baseline", "candidate", "metal"]
+
+[model]
+label = "Gemma 4 26B-A4B IT"
+path = "$PROBE_GEMMA4_26B_MODEL"
+quantization = "Q4_0"
+size_bytes = 14618145824
+sha256 = "d208665ab1cd3a69f7a9a4bc59430e8448c8093d9b06334f566ac59d6d504a03"
+
+[runtime]
+binary = "llama-bench"
+repetitions = 10
+delay_seconds = 1
+warmup = true
+offline = true
+capture_peak_memory = true
+timeout_seconds = 7200
+
+[workload]
+prompt_tokens = [512, 4096]
+generation_tokens = [128]
+combined = []
+
+[matrix]
+batch_sizes = [2048]
+ubatch_sizes = [512]
+threads = [10]
+gpu_layers = [99]
+cpu_moe_layers = [0]
+flash_attention = ["on"]
+cache_type_k = ["f16"]
+cache_type_v = ["f16"]
+mmap = [true]
+no_kv_offload = [false]
+
+[promotion]
+require_clean_repository = true
+correctness_contract = "workloads/correctness/tool-call-smoke.json"
+replication_tolerance_percent = 5.0
+max_load_1m = 8.0
+require_ac_power = true

@@ -10,6 +10,7 @@ from rich.table import Table
 
 from probe import __version__
 from probe.config import ConfigError, build_command, display_command, load_config
+from probe.evidence import EvidenceError, verify_artifact_seal
 from probe.hardware import capture_host, discover_runtime_tools, project_root
 from probe.report import ReportError, load_records, render_markdown
 from probe.runner import BenchmarkError, run_sweep
@@ -128,6 +129,19 @@ def sweep(
         console.print(
             "Model source is Hugging Face; the first real run may download model weights."
         )
+    if config.promotion.require_clean_repository:
+        tolerance = config.promotion.replication_tolerance_percent
+        assert tolerance is not None  # guarded by config validation
+        console.print(
+            "Promotion preflight: clean Git tree, verified local model bytes, locked correctness "
+            f"contract, and ±{tolerance:g}% replication "
+            "tolerance."
+        )
+        if config.promotion.max_load_1m is not None:
+            console.print(
+                f"Environment gate: 1-minute load ≤ {config.promotion.max_load_1m:g}"
+                + (" and AC power required." if config.promotion.require_ac_power else ".")
+            )
     if dry_run:
         console.print("\n[bold]Command[/bold]")
         console.print(display_command(command), soft_wrap=True)
@@ -169,6 +183,26 @@ def compare_command(
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(markdown, encoding="utf-8")
     console.print(f"Wrote {destination}")
+
+
+@app.command("verify-artifact")
+def verify_artifact_command(
+    artifact_dir: Path = typer.Argument(..., help="Sealed benchmark artifact directory."),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
+) -> None:
+    """Verify that a finalized artifact still matches its detached SHA-256 seal."""
+
+    try:
+        evidence = verify_artifact_seal(artifact_dir)
+    except EvidenceError as exc:
+        _fail(str(exc))
+    if json_output:
+        typer.echo(json.dumps(evidence, indent=2, sort_keys=True))
+        return
+    console.print(
+        f"Verified {evidence['files_verified']} files. "
+        f"Seal SHA-256: [bold]{evidence['seal_sha256']}[/bold]"
+    )
 
 
 def _fail(message: str) -> NoReturn:

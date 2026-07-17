@@ -58,6 +58,8 @@ Inspect the exact command and matrix before running anything expensive:
 ```bash
 uv run probe sweep --dry-run configs/gemma4-e4b-smoke.toml
 uv run probe sweep --dry-run configs/gemma4-26b-a4b-baseline.toml
+PROBE_GEMMA4_26B_MODEL=/absolute/path/to/model.gguf \
+  uv run probe sweep --dry-run configs/gemma4-26b-a4b-baseline-v2.toml
 ```
 
 The first non-offline run downloads the configured GGUF from Hugging Face. Start with the smaller
@@ -68,9 +70,16 @@ uv run probe sweep configs/gemma4-e4b-smoke.toml
 uv run probe sweep configs/gemma4-26b-a4b-baseline.toml
 ```
 
+The `baseline-v2` config is the only current promotion-eligible 26B contract. It uses a local model
+path so Probe can verify the full file before execution, rejects dirty source or a busy/unplugged
+host, locks a 5% independent-replication tolerance, copies the correctness contract into the
+artifact, and seals every finalized file. Run it only after the model path is exported and the
+worktree is clean.
+
 Compare every artifact beneath `results/`, or select a comparable workload:
 
 ```bash
+uv run probe verify-artifact results/<run-id>
 uv run probe compare results
 uv run probe compare results --test tg128 --output reports/tg128.md
 ```

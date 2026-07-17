@@ -17,7 +17,7 @@ must use separate protocols and cannot be mixed into this baseline.
 ## Candidate loop
 
 1. **Lock the contract.** Fix model bytes, runtime commit, workload, correctness checks, metrics,
-   repetitions, and promotion threshold before tuning.
+   repetitions, replication tolerance, and start-environment gates before tuning.
 2. **Capture the starting state.** Record the Git commit and dirty diff, host, power/thermal state,
    free memory and disk, active competing workloads, and prior baseline.
 3. **Run on real hardware.** Compile or configure, check correctness, warm up, benchmark, inspect raw
@@ -47,8 +47,10 @@ must use separate protocols and cannot be mixed into this baseline.
 | Correctness | Deterministic sampled output plus milestone-specific quality gates |
 | Trace | Artifact `trace.jsonl`, workflow ledger, exact worker prompt, and raw audit output |
 | Audit | Independent empirical replication and explicit promotion verdict |
+| Integrity | Detached SHA-256 seal covering every finalized primary artifact file |
 
 Artifacts are immutable. Corrections create a new artifact and link back to the invalidated one.
+The primary tracked report records the detached seal digest.
 
 ## Reward-hacking and validity threat model
 
@@ -99,6 +101,19 @@ The primary and independent audits must mark each item pass, fail, or unknown.
 
 Only `Audited baseline` results may anchor speedup claims. Audit disagreement is preserved rather
 than averaged away.
+
+Replication agreement is evaluated separately for every audited workload as
+`abs(independent_mean - primary_mean) / primary_mean * 100`. Every required workload must be at or
+below the tolerance declared in the candidate config before the primary run. The primary and audit
+means are never averaged to manufacture agreement, and the tolerance cannot be widened afterward.
+
+## Promotion preflight
+
+The promotion-eligible 26B config is `configs/gemma4-26b-a4b-baseline-v2.toml`. Before artifact
+creation, Probe hashes the exact local model, checks its committed size and digest, captures Git
+HEAD/status/diff, rejects a dirty or unavailable repository, captures the host environment, rejects
+start load above the configured ceiling, and requires AC power when declared. This preflight is a
+guardrail, not a quality verdict; correctness execution and independent audit are still mandatory.
 
 ## Durable custody
 
