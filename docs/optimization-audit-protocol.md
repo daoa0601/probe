@@ -4,6 +4,18 @@ Probe adopts an evidence and audit loop inspired by the KernelBench testing disc
 is different—whole-model inference on Apple Silicon rather than a single CUDA kernel—but the core
 rule transfers directly: an optimizer must not be the sole judge of its own result.
 
+Portable evidence hashing and artifact sealing are supplied by `benchmark-audit-core`. Probe does
+not use that package's `evaluate_headline_gate()` result as its promotion verdict: schema `1.0.0`
+requires a human or hybrid manual review, while this protocol permits an independent read-only agent
+and additionally requires exact model bytes, application correctness, start-state gates,
+per-workload replication within the predeclared tolerance, and a separate Probe audit decision.
+Those policy differences are intentional; only the integrity mechanics are shared today.
+
+The core is intentionally a workspace-local dependency. Probe's `[tool.uv.sources]` entry resolves
+`../benchmark-audit-core`, so CI or a relocated checkout must provide the sibling source, vendor it,
+or select an explicitly pinned Git source. Regenerate `uv.lock` and test the frozen environment
+after changing that source binding.
+
 ## Unit of work
 
 One optimization cell is one autonomous session on the physical target machine, with one model,

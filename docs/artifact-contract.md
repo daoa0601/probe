@@ -53,3 +53,8 @@ an external timestamp authority; a tracked report records the seal digest so lat
 detectable. Adding, removing, or changing a file after sealing invalidates promotion eligibility.
 Verify an artifact before analysis with `uv run probe verify-artifact results/<run-id>`; the command
 also prints the seal's own digest for inclusion in the tracked report and audit ledger.
+
+The streaming SHA-256 and flat-directory seal implementation comes from `benchmark-audit-core`.
+Probe retains the wrapper and command so integrity failures remain `EvidenceError`s and fit the
+existing CLI contract. The core rejects symlinks and nested or non-file entries rather than leaving
+them outside the seal.

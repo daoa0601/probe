@@ -40,6 +40,17 @@ independent audit found valid inference but blocked promotion on provenance and 
 All promoted results follow the
 [optimization and independent-audit protocol](docs/optimization-audit-protocol.md).
 
+Probe imports streaming SHA-256 and detached artifact-seal primitives from the sibling
+[`benchmark-audit-core`](../benchmark-audit-core/) package. Its model/runtime correctness checks,
+clean-source and start-environment gates, replication tolerance, and independent promotion verdict
+remain Probe-owned policy. Probe does not use the core's `evaluate_headline_gate()` result as its
+promotion verdict.
+
+The core is intentionally workspace-local, and this checkout resolves it through
+`../benchmark-audit-core`. A relocated Probe clone or CI job must provide that sibling source,
+vendor the same code, or use an explicitly pinned Git source. Regenerate and verify `uv.lock` when
+the source location changes.
+
 ## Quick start
 
 Requirements: macOS on Apple Silicon, Python 3.11+, [`uv`](https://docs.astral.sh/uv/), Xcode command
@@ -108,7 +119,7 @@ docs/                research protocol and artifact contracts
 models/              ignored local weight cache
 runtime/             pinned runtime revisions
 scripts/             reproducible local runtime bootstrap
-src/probe/           CLI, config compiler, hardware capture, runner, and reporting
+src/probe/           CLI, config compiler, hardware capture, policy adapters, runner, and reporting
 tests/               hardware-independent unit and CLI tests
 ```
 

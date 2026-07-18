@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import json
 import os
 import shutil
 import subprocess
@@ -9,21 +7,19 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from benchmark_audit_core import (
+    IntegrityError,
+    create_artifact_seal,
+    sha256_file,
+)
+from benchmark_audit_core import (
+    verify_artifact_seal as verify_core_artifact_seal,
+)
 from probe.config import Model
 
 
 class EvidenceError(RuntimeError):
     """Raised when promotion evidence cannot be captured or verified."""
-
-
-def sha256_file(path: Path) -> str:
-    """Hash a file without loading model-sized inputs into memory."""
-
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while chunk := handle.read(8 * 1024 * 1024):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def capture_model_identity(model: Model, root: Path) -> dict[str, Any]:
@@ -136,60 +132,21 @@ def capture_environment() -> dict[str, Any]:
 def seal_artifact(directory: Path) -> dict[str, Any]:
     """Digest every finalized artifact file except the detached seal itself."""
 
-    files: dict[str, dict[str, int | str]] = {}
-    for path in sorted(directory.iterdir(), key=lambda item: item.name):
-        if path.name == "seal.json" or not path.is_file():
-            continue
-        files[path.name] = {
-            "bytes": path.stat().st_size,
-            "sha256": sha256_file(path),
-        }
-    return {
-        "schema_version": 1,
-        "algorithm": "sha256",
-        "created_at": _now(),
-        "files": files,
-    }
+    try:
+        seal = create_artifact_seal(directory)
+    except IntegrityError as exc:
+        raise EvidenceError(str(exc)) from exc
+    return seal.model_dump(mode="json", by_alias=True)
 
 
 def verify_artifact_seal(directory: Path) -> dict[str, Any]:
     """Verify a detached artifact seal and reject additions, removals, or mutations."""
 
-    resolved = directory.expanduser().resolve()
-    seal_path = resolved / "seal.json"
     try:
-        decoded = json.loads(seal_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, ValueError) as exc:
-        raise EvidenceError(f"could not read artifact seal {seal_path}: {exc}") from exc
-    if not isinstance(decoded, dict) or decoded.get("algorithm") != "sha256":
-        raise EvidenceError(f"invalid artifact seal: {seal_path}")
-    sealed_files = decoded.get("files")
-    if not isinstance(sealed_files, dict):
-        raise EvidenceError(f"artifact seal has no file map: {seal_path}")
-
-    actual_names = {
-        path.name for path in resolved.iterdir() if path.is_file() and path.name != "seal.json"
-    }
-    sealed_names = set(sealed_files)
-    if actual_names != sealed_names:
-        added = sorted(actual_names - sealed_names)
-        missing = sorted(sealed_names - actual_names)
-        raise EvidenceError(f"artifact file set changed: added={added}, missing={missing}")
-
-    for name in sorted(sealed_names):
-        evidence = sealed_files[name]
-        if not isinstance(evidence, dict):
-            raise EvidenceError(f"invalid seal entry for {name}")
-        path = resolved / name
-        observed_size = path.stat().st_size
-        observed_digest = sha256_file(path)
-        if evidence.get("bytes") != observed_size or evidence.get("sha256") != observed_digest:
-            raise EvidenceError(f"artifact seal mismatch: {name}")
-    return {
-        "artifact": str(resolved),
-        "files_verified": len(sealed_names),
-        "seal_sha256": sha256_file(seal_path),
-    }
+        verification = verify_core_artifact_seal(directory)
+    except IntegrityError as exc:
+        raise EvidenceError(str(exc)) from exc
+    return verification.model_dump(mode="json")
 
 
 def _git_text(git: str, root: Path, arguments: list[str]) -> str:
