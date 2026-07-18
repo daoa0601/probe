@@ -7,13 +7,28 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: probe
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out Probe
+        uses: actions/checkout@v4
+        with:
+          path: probe
+          persist-credentials: false
+      - name: Check out Benchmark Audit Core
+        uses: actions/checkout@v4
+        with:
+          path: benchmark-audit-core
+          persist-credentials: false
+          ref: 434b9c0337913e6077ffc3787f1c7a98629bbda9
+          repository: daoa0601/benchmark-audit-core
       - uses: astral-sh/setup-uv@v6
         with:
+          cache-dependency-glob: probe/uv.lock
           enable-cache: true
       - uses: actions/setup-python@v5
         with:
-          python-version-file: .python-version
+          python-version-file: probe/.python-version
       - run: uv sync --all-extras --locked
       - run: make check
