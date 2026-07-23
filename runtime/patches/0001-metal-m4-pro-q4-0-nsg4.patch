@@ -1,0 +1,89 @@
+diff --git a/ggml/src/ggml-metal/ggml-metal-device.cpp b/ggml/src/ggml-metal/ggml-metal-device.cpp
+index 270c1411..a5ddff06 100644
+--- a/ggml/src/ggml-metal/ggml-metal-device.cpp
++++ b/ggml/src/ggml-metal/ggml-metal-device.cpp
+@@ -763,7 +763,10 @@ ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_mul_mm(ggml_meta
+     return res;
+ }
+ 
+-ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_mul_mv(ggml_metal_library_t lib, const ggml_tensor * op) {
++ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_mul_mv(
++        ggml_metal_library_t lib,
++        const ggml_tensor * op,
++        int nsg_q4_0) {
+     GGML_TENSOR_LOCALS( int32_t, ne0, op->src[0], ne);
+     GGML_TENSOR_LOCALS( int32_t, ne1, op->src[1], ne);
+ 
+@@ -812,7 +815,7 @@ ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_mul_mv(ggml_meta
+             } break;
+         case GGML_TYPE_Q4_0:
+             {
+-                nsg = N_SG_Q4_0;
++                nsg = nsg_q4_0;
+                 nr0 = N_R0_Q4_0;
+             } break;
+         case GGML_TYPE_Q4_1:
+@@ -999,7 +1002,10 @@ ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_mul_mm_id(ggml_m
+     return res;
+ }
+ 
+-ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_mul_mv_id(ggml_metal_library_t lib, const ggml_tensor * op) {
++ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_mul_mv_id(
++        ggml_metal_library_t lib,
++        const ggml_tensor * op,
++        int nsg_q4_0) {
+     GGML_TENSOR_LOCALS( int32_t, ne0, op->src[0], ne);
+     GGML_TENSOR_LOCALS( int32_t, ne1, op->src[1], ne);
+ 
+@@ -1041,7 +1047,7 @@ ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_mul_mv_id(ggml_m
+             } break;
+         case GGML_TYPE_Q4_0:
+             {
+-                nsg = N_SG_Q4_0;
++                nsg = nsg_q4_0;
+                 nr0 = N_R0_Q4_0;
+             } break;
+         case GGML_TYPE_Q4_1:
+diff --git a/ggml/src/ggml-metal/ggml-metal-device.h b/ggml/src/ggml-metal/ggml-metal-device.h
+index b36fa811..29742801 100644
+--- a/ggml/src/ggml-metal/ggml-metal-device.h
++++ b/ggml/src/ggml-metal/ggml-metal-device.h
+@@ -132,10 +132,10 @@ struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_gated_del
+ struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_solve_tri         (ggml_metal_library_t lib, const struct ggml_tensor * op);
+ struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_mul_mv_ext        (ggml_metal_library_t lib, const struct ggml_tensor * op, int nsg, int nxpsg, int r1ptg);
+ struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_mul_mm            (ggml_metal_library_t lib, const struct ggml_tensor * op);
+-struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_mul_mv            (ggml_metal_library_t lib, const struct ggml_tensor * op);
++struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_mul_mv            (ggml_metal_library_t lib, const struct ggml_tensor * op, int nsg_q4_0);
+ struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_mul_mm_id_map0    (ggml_metal_library_t lib, int ne02, int ne20);
+ struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_mul_mm_id         (ggml_metal_library_t lib, const struct ggml_tensor * op);
+-struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_mul_mv_id         (ggml_metal_library_t lib, const struct ggml_tensor * op);
++struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_mul_mv_id         (ggml_metal_library_t lib, const struct ggml_tensor * op, int nsg_q4_0);
+ struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_argmax            (ggml_metal_library_t lib, const struct ggml_tensor * op);
+ struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_argsort           (ggml_metal_library_t lib, const struct ggml_tensor * op);
+ struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_argsort_merge     (ggml_metal_library_t lib, const struct ggml_tensor * op);
+diff --git a/ggml/src/ggml-metal/ggml-metal-ops.cpp b/ggml/src/ggml-metal/ggml-metal-ops.cpp
+index c716f118..aed74052 100644
+--- a/ggml/src/ggml-metal/ggml-metal-ops.cpp
++++ b/ggml/src/ggml-metal/ggml-metal-ops.cpp
+@@ -2221,7 +2221,9 @@ int ggml_metal_op_mul_mat(ggml_metal_op_t ctx, int idx) {
+ 
+         ggml_metal_encoder_dispatch_threadgroups(enc, ((ne11 + nr1 - 1) / nr1), ((ne01 + nr0 - 1) / nr0), ne12 * ne13, 32, nsg, 1);
+     } else {
+-        auto pipeline = ggml_metal_library_get_pipeline_mul_mv(lib, op);
++        // The M4 Pro benefits from the extra Q4_0 occupancy during single-token decode.
++        const int nsg_q4_0 = props_dev->device_id == GGML_METAL_DEVICE_M4_PRO ? 4 : N_SG_Q4_0;
++        auto pipeline = ggml_metal_library_get_pipeline_mul_mv(lib, op, nsg_q4_0);
+ 
+         const int nr0 = pipeline.nr0;
+         const int nr1 = pipeline.nr1;
+@@ -2417,7 +2419,9 @@ int ggml_metal_op_mul_mat_id(ggml_metal_op_t ctx, int idx) {
+             ggml_metal_encoder_dispatch_threadgroups(enc, (ne21 + 31)/32, (ne01 + 63)/64, ne02, 128, 1, 1);
+         }
+     } else {
+-        auto pipeline = ggml_metal_library_get_pipeline_mul_mv_id(lib, op);
++        // Keep the MoE path in sync with the dense Q4_0 mat-vec dispatch.
++        const int nsg_q4_0 = props_dev->device_id == GGML_METAL_DEVICE_M4_PRO ? 4 : N_SG_Q4_0;
++        auto pipeline = ggml_metal_library_get_pipeline_mul_mv_id(lib, op, nsg_q4_0);
+ 
+         const int nr0 = pipeline.nr0;
+         const int nr1 = pipeline.nr1;

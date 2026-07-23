@@ -40,6 +40,15 @@ independent audit found valid inference but blocked promotion on provenance and 
 All promoted results follow the
 [optimization and independent-audit protocol](docs/optimization-audit-protocol.md).
 
+The first retained kernel optimization is
+[`runtime/patches/0001-metal-m4-pro-q4-0-nsg4.patch`](runtime/patches/0001-metal-m4-pro-q4-0-nsg4.patch).
+It specializes the Q4_0 Metal matrix-vector dispatch for M4 Pro from two to four SIMD groups while
+leaving other Apple GPUs unchanged. Direct, interleaved 10-repetition checks under a busy host
+measured 26B decode at 65.259 versus 63.854 tokens/s (+2.20%) and 12B decode at 28.475 versus 28.154
+tokens/s (+1.14%). The candidate kept the deterministic tool-call output exact; 26B prompt
+processing remained within 0.3% of the reference. The bootstrap script applies the patch to the
+pinned runtime and safely recognizes an already-patched checkout.
+
 Probe imports streaming SHA-256 and detached artifact-seal primitives from the sibling
 [`benchmark-audit-core`](../benchmark-audit-core/) package. Its model/runtime correctness checks,
 clean-source and start-environment gates, replication tolerance, and independent promotion verdict

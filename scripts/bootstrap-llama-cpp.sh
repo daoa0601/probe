@@ -3,6 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ref_file="$repo_root/runtime/llama-cpp.ref"
+patch_dir="$repo_root/runtime/patches"
 source_dir="${PROBE_LLAMA_CPP_SOURCE:-$repo_root/.cache/llama.cpp}"
 build_dir="${PROBE_LLAMA_CPP_BUILD:-$source_dir/build}"
 
@@ -21,6 +22,18 @@ if [[ ! "$ref" =~ ^[0-9a-f]{40}$ ]]; then
   exit 1
 fi
 
+shopt -s nullglob
+patches=("$patch_dir"/*.patch)
+shopt -u nullglob
+
+emit_patches() {
+  local patch
+  for patch in "${patches[@]}"; do
+    command cat "$patch"
+  done
+}
+
+reuse_patched_checkout=false
 if [[ -d "$source_dir/.git" ]]; then
   origin="$(git -C "$source_dir" remote get-url origin)"
   if [[ "$origin" != "https://github.com/ggml-org/llama.cpp.git" && "$origin" != "git@github.com:ggml-org/llama.cpp.git" ]]; then
@@ -28,8 +41,15 @@ if [[ -d "$source_dir/.git" ]]; then
     exit 1
   fi
   if [[ -n "$(git -C "$source_dir" status --porcelain)" ]]; then
-    echo "refusing to change a dirty llama.cpp checkout: $source_dir" >&2
-    exit 1
+    if [[ "$(git -C "$source_dir" rev-parse HEAD)" == "$ref" ]] &&
+       [[ ${#patches[@]} -gt 0 ]] &&
+       cmp -s <(git -C "$source_dir" diff HEAD --no-ext-diff --binary) <(emit_patches); then
+      reuse_patched_checkout=true
+      echo "Reusing pinned llama.cpp checkout with Probe patches already applied"
+    else
+      echo "refusing to change a dirty llama.cpp checkout: $source_dir" >&2
+      exit 1
+    fi
   fi
 elif [[ -e "$source_dir" ]]; then
   echo "refusing to overwrite non-repository path: $source_dir" >&2
@@ -38,8 +58,14 @@ else
   git clone --filter=blob:none --no-checkout https://github.com/ggml-org/llama.cpp.git "$source_dir"
 fi
 
-git -C "$source_dir" fetch --depth=1 origin "$ref"
-git -C "$source_dir" checkout --detach "$ref"
+if [[ "$reuse_patched_checkout" == false ]]; then
+  git -C "$source_dir" fetch --depth=1 origin "$ref"
+  git -C "$source_dir" checkout --detach "$ref"
+  if [[ ${#patches[@]} -gt 0 ]]; then
+    git -C "$source_dir" apply --check "${patches[@]}"
+    git -C "$source_dir" apply "${patches[@]}"
+  fi
+fi
 
 generator_args=()
 if command -v ninja >/dev/null 2>&1; then
@@ -55,5 +81,5 @@ cmake -S "$source_dir" -B "$build_dir" \
   -DLLAMA_CURL=ON
 cmake --build "$build_dir" --target llama-bench llama-server llama-cli --parallel
 
-echo "Built pinned llama.cpp $ref"
+echo "Built pinned llama.cpp $ref with ${#patches[@]} Probe patch(es)"
 echo "Binaries: $build_dir/bin"
