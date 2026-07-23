@@ -76,19 +76,18 @@ shasum -a 256 build/profile/kernel.binaryarchive build/profile/kernel.g16.metall
 This proves which device program the driver emitted and exposes native code size, section layout,
 and binary changes between candidates. It is stronger than inspecting AIR alone.
 
-## ISA blocker
+## Direct native execution and remaining ISA gap
 
 The installed Apple native translator accepts `applegpu_g16s`, and `metal-objdump` recognizes the
 extracted slice as 64-bit Apple-GPU Mach-O. The installed disassembler nevertheless returns
-`no instruction printer for target agx3---macho`. Apple publishes neither the G16 instruction
-encoding nor a supported assembler/linker contract for submitting handwritten G16 programs.
+`no instruction printer for target agx3---macho`.
 
-Consequently Probe can inspect AIR/compiler transformations and native G16 bytes, hashes, section
-sizes, and program-counter extent, but it cannot yet produce a supported mnemonic disassembly or
-inject handwritten machine code. Direct ISA work would require a G16-capable clean-room
-assembler/disassembler plus the private pipeline ABI and submission contract. The open Asahi stack
-is useful prior art, but its published M4 GPU support is not currently usable for this Mac target.
+Probe has gone below that tooling boundary. Differential compilation isolated an immediate field
+in a native G16S instruction, and a one-byte patch changed a `+1` GPU kernel into a synthesized
+`+3` kernel through a required `MTLBinaryArchive` hit. See [direct-isa.md](direct-isa.md) for the
+reproducer and adversarial controls.
 
-Until that changes, MSL plus device specialization is the lowest supported execution layer. Probe
-will use native-binary deltas and empirical GPU behavior as the compiler/ISA gate and will state
-this limitation explicitly rather than label AIR as ISA.
+This establishes a practical native-patching route, not a general assembler. Register allocation,
+instruction scheduling, control-flow encodings, descriptors, and most instruction semantics remain
+undocumented. MSL plus device specialization remains the production kernel path; differential
+native patching is an experimental final-mile option with a CPU oracle and exact archive controls.
