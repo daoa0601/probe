@@ -26,11 +26,23 @@ shopt -s nullglob
 patches=("$patch_dir"/*.patch)
 shopt -u nullglob
 
-emit_patches() {
-  local patch
-  for patch in "${patches[@]}"; do
-    command cat "$patch"
-  done
+checkout_matches_patch_stack() {
+  local patch_index_dir
+  local expected_tree
+  local matches=false
+
+  patch_index_dir="$(mktemp -d "${TMPDIR:-/tmp}/probe-patch-index.XXXXXX")"
+  if GIT_INDEX_FILE="$patch_index_dir/index" git -C "$source_dir" read-tree HEAD &&
+     GIT_INDEX_FILE="$patch_index_dir/index" git -C "$source_dir" apply --cached "${patches[@]}"; then
+    expected_tree="$(GIT_INDEX_FILE="$patch_index_dir/index" git -C "$source_dir" write-tree)"
+    if cmp -s \
+      <(git -C "$source_dir" diff HEAD --no-ext-diff --binary) \
+      <(git -C "$source_dir" diff HEAD "$expected_tree" --no-ext-diff --binary); then
+      matches=true
+    fi
+  fi
+  rm -r "$patch_index_dir"
+  [[ "$matches" == true ]]
 }
 
 reuse_patched_checkout=false
@@ -43,7 +55,7 @@ if [[ -d "$source_dir/.git" ]]; then
   if [[ -n "$(git -C "$source_dir" status --porcelain)" ]]; then
     if [[ "$(git -C "$source_dir" rev-parse HEAD)" == "$ref" ]] &&
        [[ ${#patches[@]} -gt 0 ]] &&
-       cmp -s <(git -C "$source_dir" diff HEAD --no-ext-diff --binary) <(emit_patches); then
+       checkout_matches_patch_stack; then
       reuse_patched_checkout=true
       echo "Reusing pinned llama.cpp checkout with Probe patches already applied"
     else

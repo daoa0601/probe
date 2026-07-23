@@ -32,6 +32,8 @@ The first milestone is a reproducible throughput and memory baseline:
 
 See [the research plan](docs/research-plan.md) for the path from microbenchmarks to server latency,
 quality gates, long context, energy, concurrency, and Gemma 4 MTP speculative decoding.
+The [Metal profiling and native-code gate](docs/metal-profiling.md) defines the mandatory
+compiler/device-binary, isolated-kernel, full-graph, throughput, and correctness loop.
 The first measured result is recorded in the
 [M4 Pro E4B smoke baseline](docs/baselines/2026-07-17-m4-pro-e4b-smoke.md).
 The initial 26B-A4B result is a
@@ -48,6 +50,16 @@ measured 26B decode at 65.259 versus 63.854 tokens/s (+2.20%) and 12B decode at 
 tokens/s (+1.14%). The candidate kept the deterministic tool-call output exact; 26B prompt
 processing remained within 0.3% of the reference. The bootstrap script applies the patch to the
 pinned runtime and safely recognizes an already-patched checkout.
+
+The next retained candidate is
+[`runtime/patches/0002-metal-fuse-gemma4-moe-weighted-sum.patch`](runtime/patches/0002-metal-fuse-gemma4-moe-weighted-sum.patch).
+For every 26B-A4B layer it replaces two `[2816,8]` scaling passes plus the eight-expert add chain
+with one vectorized Metal kernel. Stage-boundary GPU timestamps measured 0.00350 ms versus 0.01410
+ms for the exact three-dispatch reference shape (4.03×), while a 32-token Metal System Trace reduced
+the dominant command-buffer median from 14.148 ms to 13.104 ms. Two balanced busy-host pairs
+improved decode throughput by 3.26% and 3.05%; a third load-skewed pair is not used as evidence.
+The deterministic tool-call transcript stayed byte-identical. Gemma 4 12B is a 48-layer dense
+graph and intentionally does not select this MoE-only fusion.
 
 Probe imports streaming SHA-256 and detached artifact-seal primitives from the sibling
 [`benchmark-audit-core`](../benchmark-audit-core/) package. Its model/runtime correctness checks,

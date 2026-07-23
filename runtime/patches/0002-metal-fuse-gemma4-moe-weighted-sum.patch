@@ -1,0 +1,283 @@
+diff --git a/ggml/src/ggml-metal/ggml-metal-impl.h b/ggml/src/ggml-metal/ggml-metal-impl.h
+index 330278d0..6b964b00 100644
+--- a/ggml/src/ggml-metal/ggml-metal-impl.h
++++ b/ggml/src/ggml-metal/ggml-metal-impl.h
+@@ -237,6 +237,14 @@ typedef struct {
+     uint64_t o1[8];
+ } ggml_metal_kargs_bin;
+
++typedef struct {
++    int32_t  ne0;
++    int32_t  ne1;
++    uint64_t nb01;
++    uint64_t nb11;
++    uint64_t nb21;
++} ggml_metal_kargs_moe_weighted_sum;
++
+ typedef struct {
+     int64_t ne0;
+     int64_t ne1;
+diff --git a/ggml/src/ggml-metal/ggml-metal-ops.cpp b/ggml/src/ggml-metal/ggml-metal-ops.cpp
+index aed74052..c0d0abde 100644
+--- a/ggml/src/ggml-metal/ggml-metal-ops.cpp
++++ b/ggml/src/ggml-metal/ggml-metal-ops.cpp
+@@ -10,6 +10,7 @@
+
+ #include <cassert>
+ #include <algorithm>
++#include <cstdlib>
+ #include <limits>
+ #include <cmath>
+
+@@ -88,6 +89,16 @@ struct ggml_metal_op {
+         return ggml_can_fuse_ext(gf, idxs.data() + i0, ops, n_ops);
+     }
+
++    int use_count(const ggml_tensor * tensor) const {
++        for (int i = 0; i < gf->n_nodes; ++i) {
++            if (gf->nodes[i] == tensor) {
++                return ggml_node_get_use_count(gf, i);
++            }
++        }
++
++        return 0;
++    }
++
+     ggml_metal_device_t  dev;
+     ggml_metal_library_t lib;
+     ggml_metal_encoder_t enc;
+@@ -3128,10 +3139,180 @@ static bool ggml_metal_op_can_fuse_snake(ggml_metal_op_t ctx, int idx) {
+     return types_ok && shape_ok && dim_ok && contig_ok && x_in_add == x;
+ }
+
++static bool ggml_metal_op_can_fuse_moe_weighted_sum(ggml_metal_op_t ctx, int idx) {
++    static constexpr ggml_op ops[9] = {
++        GGML_OP_MUL,
++        GGML_OP_MUL,
++        GGML_OP_ADD,
++        GGML_OP_ADD,
++        GGML_OP_ADD,
++        GGML_OP_ADD,
++        GGML_OP_ADD,
++        GGML_OP_ADD,
++        GGML_OP_ADD,
++    };
++
++    if (getenv("GGML_METAL_MOE_WEIGHTED_SUM_DISABLE") != nullptr ||
++        idx + 9 > ctx->n_nodes()) {
++        return false;
++    }
++
++    for (int i = 0; i < 9; ++i) {
++        const ggml_tensor * node = ctx->node(idx + i);
++        if (node->op != ops[i] ||
++            (node->flags & GGML_TENSOR_FLAG_COMPUTE) == 0 ||
++            (i < 8 && (node->flags & GGML_TENSOR_FLAG_OUTPUT) != 0)) {
++            return false;
++        }
++    }
++
++    ggml_tensor * mul_scale = ctx->node(idx + 0);
++    ggml_tensor * mul_route = ctx->node(idx + 1);
++    ggml_tensor * result    = ctx->node(idx + 8);
++
++    if (mul_scale->src[0]->type != GGML_TYPE_F32 ||
++        mul_scale->src[1]->type != GGML_TYPE_F32 ||
++        mul_route->src[1]->type != GGML_TYPE_F32 ||
++        result->type            != GGML_TYPE_F32) {
++        return false;
++    }
++    if (mul_route->src[0] != mul_scale ||
++        ctx->use_count(mul_scale) != 1 ||
++        ctx->use_count(mul_route) != mul_route->ne[1] ||
++        !ggml_are_same_shape(mul_scale, mul_route) ||
++        mul_scale->ne[1] != 8 ||
++        mul_scale->ne[2] != 1 ||
++        mul_scale->ne[3] != 1 ||
++        mul_scale->src[1]->ne[0] != 1 ||
++        mul_scale->src[1]->ne[1] != mul_scale->ne[1] ||
++        mul_route->src[1]->ne[0] != 1 ||
++        mul_route->src[1]->ne[1] != mul_scale->ne[1] ||
++        result->ne[0] != mul_scale->ne[0] ||
++        result->ne[1] != 1 ||
++        result->ne[2] != 1 ||
++        result->ne[3] != 1) {
++        return false;
++    }
++    if (!ggml_is_contiguous(mul_scale->src[0]) ||
++        !ggml_is_contiguous(mul_scale->src[1]) ||
++        !ggml_is_contiguous(mul_route->src[1]) ||
++        !ggml_is_contiguous(result)) {
++        return false;
++    }
++
++    // The eight expert rows are represented by view nodes that are filtered out
++    // of ggml_metal_op::idxs. Validate the complete view/add closure explicitly:
++    // every row is consumed exactly once and every intermediate add has one use.
++    bool seen_rows[8] = {};
++    const ggml_tensor * previous_add = nullptr;
++    for (int add_idx = 0; add_idx < 7; ++add_idx) {
++        const ggml_tensor * add = ctx->node(idx + 2 + add_idx);
++        const ggml_tensor * row_views[2] = {};
++        int n_row_views = 0;
++
++        for (int src_idx = 0; src_idx < 2; ++src_idx) {
++            const ggml_tensor * src = add->src[src_idx];
++            if (previous_add != nullptr && src == previous_add) {
++                continue;
++            }
++            if (n_row_views >= 2) {
++                return false;
++            }
++            row_views[n_row_views++] = src;
++        }
++
++        const int expected_views = previous_add == nullptr ? 2 : 1;
++        if (n_row_views != expected_views ||
++            (previous_add != nullptr &&
++             add->src[0] != previous_add &&
++             add->src[1] != previous_add)) {
++            return false;
++        }
++
++        for (int view_idx = 0; view_idx < n_row_views; ++view_idx) {
++            const ggml_tensor * view = row_views[view_idx];
++            if (view == nullptr ||
++                view->op != GGML_OP_VIEW ||
++                view->view_src != mul_route ||
++                view->view_offs % mul_route->nb[1] != 0 ||
++                view->ne[0] != mul_route->ne[0] ||
++                view->ne[1] != 1 ||
++                view->ne[2] != 1 ||
++                view->ne[3] != 1 ||
++                ctx->use_count(view) != 1) {
++                return false;
++            }
++
++            const size_t row = view->view_offs / mul_route->nb[1];
++            if (row >= 8 || seen_rows[row]) {
++                return false;
++            }
++            seen_rows[row] = true;
++        }
++
++        if (add_idx < 6 && ctx->use_count(add) != 1) {
++            return false;
++        }
++        previous_add = add;
++    }
++
++    for (bool seen : seen_rows) {
++        if (!seen) {
++            return false;
++        }
++    }
++
++    return true;
++}
++
++static int ggml_metal_op_moe_weighted_sum_fused(ggml_metal_op_t ctx, int idx) {
++    ggml_tensor * mul_scale = ctx->node(idx + 0);
++    ggml_tensor * mul_route = ctx->node(idx + 1);
++    ggml_tensor * result    = ctx->node(idx + 8);
++
++    ggml_metal_kargs_moe_weighted_sum args = {
++        /*.ne0  =*/ (int32_t) mul_scale->ne[0],
++        /*.ne1  =*/ (int32_t) mul_scale->ne[1],
++        /*.nb01 =*/ mul_scale->src[0]->nb[1],
++        /*.nb11 =*/ mul_scale->src[1]->nb[1],
++        /*.nb21 =*/ mul_route->src[1]->nb[1],
++    };
++
++    const char * kernel = "kernel_moe_weighted_sum_f32";
++    auto pipeline = ggml_metal_library_get_pipeline(ctx->lib, kernel);
++    if (!pipeline.pipeline) {
++        pipeline = ggml_metal_library_compile_pipeline(ctx->lib, kernel, kernel, nullptr);
++    }
++
++    for (int i = 1; i < 9; ++i) {
++        if (!ggml_metal_op_concurrency_check(ctx, ctx->node(idx + i))) {
++            ggml_metal_op_concurrency_reset(ctx);
++            break;
++        }
++    }
++
++    ggml_metal_encoder_set_pipeline(ctx->enc, pipeline);
++    ggml_metal_encoder_set_bytes   (ctx->enc, &args, sizeof(args), 0);
++    ggml_metal_encoder_set_buffer  (ctx->enc, ggml_metal_get_buffer_id(mul_scale->src[0]), 1);
++    ggml_metal_encoder_set_buffer  (ctx->enc, ggml_metal_get_buffer_id(mul_scale->src[1]), 2);
++    ggml_metal_encoder_set_buffer  (ctx->enc, ggml_metal_get_buffer_id(mul_route->src[1]), 3);
++    ggml_metal_encoder_set_buffer  (ctx->enc, ggml_metal_get_buffer_id(result),            4);
++
++    const int nth = 128;
++    const int ne0_vec = (args.ne0 + 3)/4;
++    ggml_metal_encoder_dispatch_threadgroups(
++        ctx->enc, (ne0_vec + nth - 1)/nth, 1, 1, nth, 1, 1);
++
++    return 9;
++}
++
+ int ggml_metal_op_bin(ggml_metal_op_t ctx, int idx) {
+     if (ctx->use_fusion && ggml_metal_op_can_fuse_snake(ctx, idx)) {
+         return ggml_metal_op_snake_fused(ctx, idx);
+     }
++    if (ctx->use_fusion && ggml_metal_op_can_fuse_moe_weighted_sum(ctx, idx)) {
++        return ggml_metal_op_moe_weighted_sum_fused(ctx, idx);
++    }
+
+     ggml_tensor * op = ctx->node(idx);
+
+diff --git a/ggml/src/ggml-metal/ggml-metal.metal b/ggml/src/ggml-metal/ggml-metal.metal
+index 969fddfa..45974e96 100644
+--- a/ggml/src/ggml-metal/ggml-metal.metal
++++ b/ggml/src/ggml-metal/ggml-metal.metal
+@@ -1419,6 +1419,49 @@ typedef decltype(kernel_bin_fuse_impl<float, float, float>) kernel_bin_fuse_t;
+ template [[host_name("kernel_bin_fuse_f32_f32_f32")]]   kernel kernel_bin_fuse_t kernel_bin_fuse_impl<float,  float,  float>;
+ template [[host_name("kernel_bin_fuse_f32_f32_f32_4")]] kernel kernel_bin_fuse_t kernel_bin_fuse_impl<float4, float4, float4>;
+
++kernel void kernel_moe_weighted_sum_f32(
++        constant ggml_metal_kargs_moe_weighted_sum & args,
++        device const char * src0,
++        device const char * expert_scale,
++        device const char * routing_weight,
++        device       char * dst,
++        uint i0[[thread_position_in_grid]]) {
++    const uint ne0 = (uint) args.ne0;
++    const uint element = 4*i0;
++    if (element >= ne0) {
++        return;
++    }
++
++    if (element + 4 <= ne0) {
++        float4 sum = 0.0f;
++        for (int expert = 0; expert < args.ne1; ++expert) {
++            const float scale =
++                *((device const float *) (expert_scale + expert*args.nb11));
++            const float weight =
++                *((device const float *) (routing_weight + expert*args.nb21));
++            const device float4 * values =
++                (device const float4 *) (src0 + expert*args.nb01);
++            sum += (values[i0] * scale) * weight;
++        }
++        ((device float4 *) dst)[i0] = sum;
++        return;
++    }
++
++    for (uint tail = element; tail < ne0; ++tail) {
++        float sum = 0.0f;
++        for (int expert = 0; expert < args.ne1; ++expert) {
++            const float scale =
++                *((device const float *) (expert_scale + expert*args.nb11));
++            const float weight =
++                *((device const float *) (routing_weight + expert*args.nb21));
++            const device float * values =
++                (device const float *) (src0 + expert*args.nb01);
++            sum += (values[tail] * scale) * weight;
++        }
++        ((device float *) dst)[tail] = sum;
++    }
++}
++
+ kernel void kernel_add_id(
+         constant ggml_metal_kargs_add_id & args,
+         device const char * src0,
