@@ -62,6 +62,32 @@ def test_promotion_baseline_locks_model_contract_and_tolerance(
     assert "--offline" in command
 
 
+def test_12b_promotion_baseline_locks_model_contract_and_tolerance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model_path = "/tmp/probe-gemma4-12b-fixture.gguf"
+    monkeypatch.setenv("PROBE_GEMMA4_12B_MODEL", model_path)
+
+    config = load_config(ROOT / "configs" / "gemma4-12b-baseline-v1.toml")
+    command = build_command(config)
+
+    assert config.model.label == "Gemma 4 12B IT"
+    assert config.model.path == model_path
+    assert config.model.size_bytes == 7_219_673_216
+    assert config.model.sha256 == (
+        "3712b9bd32cae83a22f67ee7a4466d8d7a4f21646ac8a07d19bf9418e8767a70"
+    )
+    assert config.promotion.require_clean_repository is True
+    assert config.promotion.correctness_contract == Path(
+        "workloads/correctness/tool-call-smoke.json"
+    )
+    assert config.promotion.replication_tolerance_percent == 5.0
+    assert config.promotion.max_load_1m == 8.0
+    assert config.promotion.require_ac_power is True
+    assert _argument(command, "--model") == model_path
+    assert "--offline" in command
+
+
 def test_promotion_config_requires_complete_precommit_contract(tmp_path: Path) -> None:
     config_path = _write_config(
         tmp_path,

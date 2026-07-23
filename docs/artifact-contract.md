@@ -14,8 +14,9 @@ Each `probe sweep` writes a new `results/<run-id>/` directory and never modifies
 | `promotion.json` | Predeclared replication tolerance and correctness-contract digest, when configured. |
 | `correctness-contract.json` | Byte-for-byte copy of the precommitted correctness input, when configured. |
 | `correctness-command.txt` | Exact deterministic `llama-cli` command used for the promotion check. |
-| `correctness-stdout.json` | Untouched assistant output from the deterministic check. |
+| `correctness-stdout.json` | Untouched console stdout from the deterministic check, including any runtime UI. |
 | `correctness-stderr.log` | Untouched diagnostics from the deterministic check. |
+| `correctness-transcript.txt` | Dedicated single-turn `llama-cli --output` transcript used to isolate the assistant response. |
 | `correctness-result.json` | Parse status, expected and observed values, exact equality, exit code, and timing. |
 | `stdout.json` | Unmodified structured llama-bench output. |
 | `stderr.log` | Runtime diagnostics and macOS `/usr/bin/time -l` telemetry. |

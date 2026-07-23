@@ -1,0 +1,48 @@
+# Source: ggml-org/gemma-4-12B-it-GGUF at
+# d72ee27227da2ba16c725180ddd507ee96208d23, file gemma-4-12B-it-Q4_0.gguf.
+[experiment]
+name = "gemma4-12b-baseline-v1"
+description = "Promotion-eligible 12B comparison using the same workloads and controls as 26B-A4B."
+output_dir = "results"
+tags = ["gemma4", "12b", "baseline", "candidate", "metal"]
+
+[model]
+label = "Gemma 4 12B IT"
+path = "$PROBE_GEMMA4_12B_MODEL"
+quantization = "Q4_0"
+size_bytes = 7219673216
+sha256 = "3712b9bd32cae83a22f67ee7a4466d8d7a4f21646ac8a07d19bf9418e8767a70"
+
+[runtime]
+binary = "llama-bench"
+repetitions = 10
+delay_seconds = 1
+warmup = true
+offline = true
+capture_peak_memory = true
+timeout_seconds = 7200
+
+[workload]
+prompt_tokens = [512, 4096]
+generation_tokens = [128]
+combined = []
+
+[matrix]
+batch_sizes = [2048]
+ubatch_sizes = [512]
+threads = [10]
+gpu_layers = [99]
+cpu_moe_layers = [0]
+flash_attention = ["on"]
+cache_type_k = ["f16"]
+cache_type_v = ["f16"]
+mmap = [true]
+no_kv_offload = [false]
+
+[promotion]
+require_clean_repository = true
+correctness_binary = "llama-cli"
+correctness_contract = "workloads/correctness/tool-call-smoke.json"
+replication_tolerance_percent = 5.0
+max_load_1m = 8.0
+require_ac_power = true

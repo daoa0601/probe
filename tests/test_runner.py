@@ -10,6 +10,7 @@ import pytest
 from probe.config import load_config
 from probe.evidence import EvidenceError, verify_artifact_seal
 from probe.runner import BenchmarkError, parse_peak_rss, run_sweep
+from probe.runner import _parse_correctness_transcript as parse_correctness_transcript
 from probe.runner import _validate_correctness_contract as validate_correctness_contract
 from probe.runner import _validate_environment_for_promotion as validate_promotion_environment
 
@@ -207,7 +208,44 @@ def test_promotion_run_captures_clean_source_and_locked_contract(tmp_path: Path)
     assert correctness["status"] == "pass"
     assert correctness["observed"] == 1
     assert correctness["exact_match"] is True
-    assert (artifact.directory / "correctness-stdout.json").read_text(encoding="utf-8") == "1\n"
+    assert correctness["response_source"] == "correctness-transcript.txt"
+    assert (artifact.directory / "correctness-stdout.json").read_text(
+        encoding="utf-8"
+    ) == "fake cli console\n"
+    assert (artifact.directory / "correctness-transcript.txt").read_text(
+        encoding="utf-8"
+    ) == "User:\nreturn 1\n\nAssistant:\n1\n\n"
+
+
+def test_correctness_transcript_parser_ignores_console_and_prompt_json() -> None:
+    prompt = 'Return {"type":"object"} and no prose.'
+    transcript = f'User:\n{prompt}\n\nAssistant:\n{{"answer": 1}}\n\n'
+
+    assert parse_correctness_transcript(transcript, prompt) == {"answer": 1}
+
+
+@pytest.mark.parametrize(
+    ("transcript", "message"),
+    [
+        ('Assistant:\n{"answer":1}\n\n', "exact user/assistant frame"),
+        ('User:\np\n\nAssistant:\n{"answer":1}', "assistant delimiter"),
+        ("User:\np\n\nAssistant:\n\n\n", "empty assistant response"),
+        (
+            'User:\np\n\nAssistant:\n{"answer":1}\\nprose\n\n',
+            "not exactly one JSON value",
+        ),
+        (
+            'User:\np\n\nAssistant:\n{"answer":1}\n\nAssistant:\n{"answer":1}\n\n',
+            "not exactly one JSON value",
+        ),
+    ],
+)
+def test_correctness_transcript_parser_rejects_ambiguous_output(
+    transcript: str,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        parse_correctness_transcript(transcript, "p")
 
 
 def test_promotion_run_rejects_dirty_repository(tmp_path: Path) -> None:
@@ -330,7 +368,18 @@ max_load_1m = 10000.0
 def _fake_correctness_binary(tmp_path: Path, *, output: str) -> Path:
     binary = tmp_path / "fake-llama-cli"
     binary.write_text(
-        f"#!/bin/sh\nprintf '%s\\n' 'fake correctness diagnostic' >&2\nprintf '%s\\n' '{output}'\n",
+        "#!/bin/sh\n"
+        "output_file=''\n"
+        'while [ "$#" -gt 0 ]; do\n'
+        "  if [ \"$1\" = '--output' ]; then\n"
+        "    shift\n"
+        '    output_file="$1"\n'
+        "  fi\n"
+        "  shift\n"
+        "done\n"
+        "printf '%s\\n' 'fake correctness diagnostic' >&2\n"
+        "printf '%s\\n' 'fake cli console'\n"
+        f"printf 'User:\\nreturn 1\\n\\nAssistant:\\n%s\\n\\n' '{output}' > \"$output_file\"\n",
         encoding="utf-8",
     )
     binary.chmod(0o755)

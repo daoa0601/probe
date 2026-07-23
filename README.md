@@ -71,6 +71,8 @@ uv run probe sweep --dry-run configs/gemma4-e4b-smoke.toml
 uv run probe sweep --dry-run configs/gemma4-26b-a4b-baseline.toml
 PROBE_GEMMA4_26B_MODEL=/absolute/path/to/model.gguf \
   uv run probe sweep --dry-run configs/gemma4-26b-a4b-baseline-v2.toml
+PROBE_GEMMA4_12B_MODEL=/absolute/path/to/model.gguf \
+  uv run probe sweep --dry-run configs/gemma4-12b-baseline-v1.toml
 ```
 
 The first non-offline run downloads the configured GGUF from Hugging Face. Start with the smaller
@@ -81,11 +83,11 @@ uv run probe sweep configs/gemma4-e4b-smoke.toml
 uv run probe sweep configs/gemma4-26b-a4b-baseline.toml
 ```
 
-The `baseline-v2` config is the only current promotion-eligible 26B contract. It uses a local model
-path so Probe can verify the full file before execution, rejects dirty source or a busy/unplugged
-host, locks a 5% independent-replication tolerance, copies the correctness contract into the
-artifact, executes it as an exact parsed-output gate, and seals every finalized file. Run it only
-after the model path is exported and the worktree is clean.
+The 26B `baseline-v2` and 12B `baseline-v1` configs are promotion-eligible contracts. They use local
+model paths so Probe can verify every weight byte before execution, reject dirty source or a
+busy/unplugged host, lock a 5% independent-replication tolerance, copy the correctness contract into
+the artifact, execute it as an exact parsed-output gate, and seal every finalized file. Run one only
+after its model path is exported and the worktree is clean.
 
 Compare every artifact beneath `results/`, or select a comparable workload:
 
@@ -129,6 +131,7 @@ tests/               hardware-independent unit and CLI tests
 - [Official Gemma 4 26B-A4B instruction model](https://huggingface.co/google/gemma-4-26B-A4B-it)
 - [Official Gemma 4 26B-A4B QAT Q4_0 GGUF](https://huggingface.co/google/gemma-4-26B-A4B-it-qat-q4_0-gguf)
 - [llama.cpp Gemma 4 26B-A4B GGUF conversion](https://huggingface.co/ggml-org/gemma-4-26B-A4B-it-GGUF)
+- [llama.cpp Gemma 4 12B GGUF conversion](https://huggingface.co/ggml-org/gemma-4-12B-it-GGUF)
 - [`llama.cpp`](https://github.com/ggml-org/llama.cpp)
 
 Gemma 4 and its runtime support are evolving quickly. Probe pins every benchmarkable runtime and

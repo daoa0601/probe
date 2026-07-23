@@ -48,6 +48,7 @@ class CorrectnessArtifact:
     command: list[str]
     stdout: str
     stderr: str
+    transcript: str
     result: dict[str, Any]
 
 
@@ -244,10 +245,12 @@ def run_sweep(
 
     correctness_artifact: CorrectnessArtifact | None = None
     if correctness_binary is not None and correctness_spec is not None:
+        correctness_transcript_path = artifact_dir / "correctness-transcript.txt"
         correctness_command = _build_correctness_command(
             config,
             binary=correctness_binary,
             contract=correctness_spec,
+            transcript_path=correctness_transcript_path,
         )
         _append_trace(
             trace_path,
@@ -261,6 +264,7 @@ def run_sweep(
             cwd=repository_root,
             environment=environment,
             timeout_seconds=config.runtime.timeout_seconds,
+            transcript_path=correctness_transcript_path,
         )
         _write_text_atomic(
             artifact_dir / "correctness-command.txt",
@@ -273,6 +277,10 @@ def run_sweep(
         _write_text_atomic(
             artifact_dir / "correctness-stderr.log",
             correctness_artifact.stderr,
+        )
+        _write_text_atomic(
+            artifact_dir / "correctness-transcript.txt",
+            correctness_artifact.transcript,
         )
         _write_json_atomic(
             artifact_dir / "correctness-result.json",
@@ -378,6 +386,7 @@ def run_sweep(
         files["correctness_command"] = "correctness-command.txt"
         files["correctness_stdout"] = "correctness-stdout.json"
         files["correctness_stderr"] = "correctness-stderr.log"
+        files["correctness_transcript"] = "correctness-transcript.txt"
         files["correctness_result"] = "correctness-result.json"
     manifest = {
         "schema_version": 2,
@@ -519,6 +528,7 @@ def _build_correctness_command(
     *,
     binary: str,
     contract: dict[str, Any],
+    transcript_path: Path,
 ) -> list[str]:
     if config.model.path is None:
         raise EvidenceError("promotion correctness requires a local model path")
@@ -564,6 +574,8 @@ def _build_correctness_command(
         "--color",
         "off",
         "--log-disable",
+        "--output",
+        str(transcript_path),
         "--prompt",
         str(contract["prompt"]),
     ]
@@ -583,6 +595,7 @@ def _run_correctness(
     cwd: Path,
     environment: dict[str, str],
     timeout_seconds: int,
+    transcript_path: Path,
 ) -> CorrectnessArtifact:
     started = time.perf_counter()
     timed_out = False
@@ -609,8 +622,14 @@ def _run_correctness(
     observed: Any = None
     parse_error: str | None = None
     try:
-        observed = json.loads(stdout.strip())
-    except json.JSONDecodeError as exc:
+        transcript = transcript_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        transcript = ""
+        parse_error = f"could not read correctness transcript: {exc}"
+    try:
+        if parse_error is None:
+            observed = _parse_correctness_transcript(transcript, str(contract["prompt"]))
+    except ValueError as exc:
         parse_error = str(exc)
     expected = contract["expected"]
     exact_match = parse_error is None and observed == expected
@@ -619,9 +638,11 @@ def _run_correctness(
         command=command,
         stdout=stdout,
         stderr=stderr,
+        transcript=transcript,
         result={
-            "schema_version": 1,
+            "schema_version": 2,
             "contract_id": contract["id"],
+            "response_source": "correctness-transcript.txt",
             "status": status,
             "return_code": return_code,
             "timed_out": timed_out,
@@ -632,6 +653,28 @@ def _run_correctness(
             "exact_match": exact_match,
         },
     )
+
+
+def _parse_correctness_transcript(transcript: str, prompt: str) -> Any:
+    """Parse one assistant JSON value from llama-cli's dedicated single-turn transcript."""
+
+    prefix = f"User:\n{prompt}\n\nAssistant:\n"
+    if not transcript.startswith(prefix):
+        raise ValueError(
+            "correctness transcript does not start with the exact user/assistant frame"
+        )
+    response = transcript[len(prefix) :]
+    if not response.endswith("\n\n"):
+        raise ValueError(
+            "correctness transcript does not end with the expected assistant delimiter"
+        )
+    response = response[:-2]
+    if not response.strip():
+        raise ValueError("correctness transcript contains an empty assistant response")
+    try:
+        return json.loads(response)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"assistant response is not exactly one JSON value: {exc}") from exc
 
 
 def _validate_source_for_promotion(
