@@ -7,11 +7,14 @@ import os
 import platform
 import re
 import shutil
+import statistics
 import subprocess
 import time
 import uuid
+from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from itertools import product
 from pathlib import Path
 from typing import Any
 
@@ -309,9 +312,7 @@ def run_sweep(
     if return_code == 0:
         try:
             decoded = json.loads(stdout)
-            if not isinstance(decoded, list) or any(not isinstance(row, dict) for row in decoded):
-                raise ValueError("llama-bench JSON must be an array of objects")
-            rows = decoded
+            rows = _validate_benchmark_rows(decoded, config, repository_root)
         except (json.JSONDecodeError, ValueError) as exc:
             parse_error = str(exc)
 
@@ -435,6 +436,231 @@ def parse_peak_rss(stderr: str) -> int | None:
 
     match = re.search(r"(?m)^\s*(\d+)\s+maximum resident set size\s*$", stderr)
     return int(match.group(1)) if match else None
+
+
+def _validate_benchmark_rows(
+    decoded: object,
+    config: ProbeConfig,
+    root: Path,
+) -> list[dict[str, Any]]:
+    if not isinstance(decoded, list) or any(not isinstance(row, dict) for row in decoded):
+        raise ValueError("llama-bench JSON must be an array of objects")
+    rows: list[dict[str, Any]] = decoded
+    if len(rows) != config.estimated_test_cases:
+        raise ValueError(
+            "llama-bench result count does not match the declared matrix: "
+            f"observed {len(rows)}, expected {config.estimated_test_cases}"
+        )
+
+    workloads = [
+        *((prompt, 0) for prompt in config.workload.prompt_tokens),
+        *((0, generation) for generation in config.workload.generation_tokens),
+        *config.workload.combined,
+    ]
+    matrix = config.matrix
+    expected_workloads = Counter(
+        workload for workload in workloads for _ in range(matrix.combination_count)
+    )
+    observed_workloads: Counter[tuple[int, int]] = Counter()
+    observed_cases: Counter[tuple[object, ...]] = Counter()
+    expected_cases = Counter(
+        (
+            prompt,
+            generation,
+            batch,
+            ubatch,
+            threads,
+            gpu_layers,
+            cpu_moe_layers,
+            1 if flash_attention == "on" else 0,
+            cache_k,
+            cache_v,
+            mmap,
+            no_kv_offload,
+        )
+        for prompt, generation in workloads
+        for (
+            batch,
+            ubatch,
+            threads,
+            gpu_layers,
+            cpu_moe_layers,
+            flash_attention,
+            cache_k,
+            cache_v,
+            mmap,
+            no_kv_offload,
+        ) in product(
+            matrix.batch_sizes,
+            matrix.ubatch_sizes,
+            matrix.threads,
+            matrix.gpu_layers,
+            matrix.cpu_moe_layers,
+            matrix.flash_attention,
+            matrix.cache_type_k,
+            matrix.cache_type_v,
+            matrix.mmap,
+            matrix.no_kv_offload,
+        )
+    )
+    strict_flash_attention = "auto" not in matrix.flash_attention
+    expected_model_path = _expected_model_path(config, root)
+
+    for index, row in enumerate(rows):
+        prompt = _benchmark_int(row, "n_prompt", index, minimum=0)
+        generation = _benchmark_int(row, "n_gen", index, minimum=0)
+        if prompt == 0 and generation == 0:
+            raise ValueError(f"llama-bench row {index} has a zero-token workload")
+        observed_workloads[(prompt, generation)] += 1
+
+        batch = _benchmark_int(row, "n_batch", index, minimum=1)
+        ubatch = _benchmark_int(row, "n_ubatch", index, minimum=1)
+        threads = _benchmark_int(row, "n_threads", index, minimum=1)
+        gpu_layers = _benchmark_int(row, "n_gpu_layers", index, minimum=0)
+        cpu_moe_layers = _benchmark_int(row, "n_cpu_moe", index, minimum=0)
+        flash_attention = _benchmark_int(row, "flash_attn", index, minimum=0)
+        cache_k = _benchmark_string(row, "type_k", index)
+        cache_v = _benchmark_string(row, "type_v", index)
+        mmap = _benchmark_bool(row, "use_mmap", index)
+        no_kv_offload = _benchmark_bool(row, "no_kv_offload", index)
+        case = (
+            prompt,
+            generation,
+            batch,
+            ubatch,
+            threads,
+            gpu_layers,
+            cpu_moe_layers,
+            flash_attention,
+            cache_k,
+            cache_v,
+            mmap,
+            no_kv_offload,
+        )
+        observed_cases[case] += 1
+
+        _validate_benchmark_samples(row, index, prompt + generation, config.runtime.repetitions)
+        if expected_model_path is not None:
+            observed_model = _benchmark_string(row, "model_filename", index)
+            observed_model_path = Path(observed_model).expanduser()
+            if not observed_model_path.is_absolute():
+                observed_model_path = root / observed_model_path
+            if observed_model_path.resolve() != expected_model_path:
+                raise ValueError(
+                    f"llama-bench row {index} model path does not match the declared model"
+                )
+
+    if observed_workloads != expected_workloads:
+        raise ValueError("llama-bench workloads do not match the declared workload matrix")
+    if strict_flash_attention and observed_cases != expected_cases:
+        raise ValueError("llama-bench settings do not match the declared parameter matrix")
+    if not strict_flash_attention:
+        observed_projected = Counter(case[:7] + case[8:] for case in observed_cases.elements())
+        expected_projected = Counter(case[:7] + case[8:] for case in expected_cases.elements())
+        if observed_projected != expected_projected:
+            raise ValueError("llama-bench settings do not match the declared parameter matrix")
+        allowed_flash = {
+            *(1 for value in matrix.flash_attention if value in {"on", "auto"}),
+            *(0 for value in matrix.flash_attention if value in {"off", "auto"}),
+        }
+        if any(case[7] not in allowed_flash for case in observed_cases):
+            raise ValueError("llama-bench flash-attention result is outside the declared matrix")
+    return rows
+
+
+def _validate_benchmark_samples(
+    row: dict[str, Any],
+    index: int,
+    tokens: int,
+    repetitions: int,
+) -> None:
+    samples_ns = row.get("samples_ns")
+    samples_ts = row.get("samples_ts")
+    if not isinstance(samples_ns, list) or len(samples_ns) != repetitions:
+        raise ValueError(f"llama-bench row {index} samples_ns count does not match repetitions")
+    if not isinstance(samples_ts, list) or len(samples_ts) != repetitions:
+        raise ValueError(f"llama-bench row {index} samples_ts count does not match repetitions")
+    for sample_index, (duration, throughput) in enumerate(zip(samples_ns, samples_ts, strict=True)):
+        if isinstance(duration, bool) or not isinstance(duration, int) or duration <= 0:
+            raise ValueError(f"llama-bench row {index} sample {sample_index} has invalid duration")
+        if (
+            isinstance(throughput, bool)
+            or not isinstance(throughput, int | float)
+            or not math.isfinite(float(throughput))
+            or throughput <= 0
+        ):
+            raise ValueError(
+                f"llama-bench row {index} sample {sample_index} has invalid throughput"
+            )
+        derived = tokens * 1_000_000_000 / duration
+        if not math.isclose(float(throughput), derived, rel_tol=5e-5, abs_tol=5e-4):
+            raise ValueError(
+                f"llama-bench row {index} sample {sample_index} token count is inconsistent"
+            )
+
+    average = row.get("avg_ts")
+    if (
+        isinstance(average, bool)
+        or not isinstance(average, int | float)
+        or not math.isfinite(float(average))
+        or average <= 0
+    ):
+        raise ValueError(f"llama-bench row {index} has invalid avg_ts")
+    recomputed_average = math.fsum(float(value) for value in samples_ts) / repetitions
+    if not math.isclose(float(average), recomputed_average, rel_tol=5e-6, abs_tol=1e-3):
+        raise ValueError(f"llama-bench row {index} avg_ts does not reproduce from samples")
+    standard_deviation = row.get("stddev_ts")
+    if (
+        isinstance(standard_deviation, bool)
+        or not isinstance(standard_deviation, int | float)
+        or not math.isfinite(float(standard_deviation))
+        or standard_deviation < 0
+    ):
+        raise ValueError(f"llama-bench row {index} has invalid stddev_ts")
+    recomputed_deviation = (
+        statistics.stdev(float(value) for value in samples_ts) if repetitions > 1 else 0.0
+    )
+    if not math.isclose(
+        float(standard_deviation),
+        recomputed_deviation,
+        rel_tol=5e-4,
+        abs_tol=1e-3,
+    ):
+        raise ValueError(f"llama-bench row {index} stddev_ts does not reproduce from samples")
+
+
+def _expected_model_path(config: ProbeConfig, root: Path) -> Path | None:
+    if config.model.path is None:
+        return None
+    candidate = Path(config.model.path).expanduser()
+    return (candidate if candidate.is_absolute() else root / candidate).resolve()
+
+
+def _benchmark_int(
+    row: dict[str, Any],
+    key: str,
+    index: int,
+    *,
+    minimum: int,
+) -> int:
+    value = row.get(key)
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+        raise ValueError(f"llama-bench row {index} has invalid {key}")
+    return value
+
+
+def _benchmark_string(row: dict[str, Any], key: str, index: int) -> str:
+    value = row.get(key)
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"llama-bench row {index} has invalid {key}")
+    return value
+
+
+def _benchmark_bool(row: dict[str, Any], key: str, index: int) -> bool:
+    value = row.get(key)
+    if not isinstance(value, bool):
+        raise ValueError(f"llama-bench row {index} has invalid {key}")
+    return value
 
 
 def _with_memory_capture(command: list[str], enabled: bool) -> list[str]:

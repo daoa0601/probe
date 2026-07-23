@@ -11,6 +11,7 @@ from probe.config import load_config
 from probe.evidence import EvidenceError, verify_artifact_seal
 from probe.runner import BenchmarkError, parse_peak_rss, run_sweep
 from probe.runner import _parse_correctness_transcript as parse_correctness_transcript
+from probe.runner import _validate_benchmark_rows as validate_benchmark_rows
 from probe.runner import _validate_correctness_contract as validate_correctness_contract
 from probe.runner import _validate_environment_for_promotion as validate_promotion_environment
 
@@ -85,6 +86,50 @@ def test_failed_run_still_writes_diagnostic_artifact(tmp_path: Path) -> None:
     trace = (artifact_dir / "trace.jsonl").read_text(encoding="utf-8")
     assert '"event": "run_finalized"' in trace
     assert '"status": "failed"' in trace
+
+
+def test_successful_process_rejects_incomplete_benchmark_matrix(tmp_path: Path) -> None:
+    binary = tmp_path / "fake-empty-llama-bench"
+    binary.write_text("#!/bin/sh\nprintf '%s\\n' '[]'\n", encoding="utf-8")
+    binary.chmod(0o755)
+    config = _local_config(tmp_path, binary)
+
+    with pytest.raises(BenchmarkError, match="result count") as captured:
+        run_sweep(config, root=tmp_path)
+
+    artifact_dir = captured.value.artifact_dir
+    assert artifact_dir is not None
+    manifest = json.loads((artifact_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["status"] == "failed"
+    assert manifest["result_count"] == 0
+    assert manifest["parse_error"] == (
+        "llama-bench result count does not match the declared matrix: observed 0, expected 1"
+    )
+    verify_artifact_seal(artifact_dir)
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"n_prompt": 0, "n_gen": 0}, "zero-token workload"),
+        ({"n_batch": 2048}, "settings do not match"),
+        ({"model_filename": "/wrong/model.gguf"}, "model path does not match"),
+        ({"samples_ts": [41.0]}, "samples_ts count"),
+        ({"stddev_ts": 1.0}, "stddev_ts does not reproduce"),
+    ],
+)
+def test_benchmark_semantics_reject_invalid_rows(
+    tmp_path: Path,
+    changes: dict[str, object],
+    message: str,
+) -> None:
+    binary = _fake_binary(tmp_path, exit_code=0)
+    config = _local_config(tmp_path, binary)
+    row = _fixture_benchmark_row(tmp_path)
+    row.update(changes)
+
+    with pytest.raises(ValueError, match=message):
+        validate_benchmark_rows([row], config, tmp_path)
 
 
 def test_artifact_verifier_rejects_mutation(tmp_path: Path) -> None:
@@ -276,18 +321,39 @@ def test_promotion_run_rejects_incorrect_model_output(tmp_path: Path) -> None:
 
 def _fake_binary(tmp_path: Path, *, exit_code: int) -> Path:
     binary = tmp_path / f"fake-llama-bench-{exit_code}"
+    output = json.dumps([_fixture_benchmark_row(tmp_path)], separators=(",", ":"))
     binary.write_text(
         "#!/bin/sh\n"
         "printf '%s\\n' 'fake diagnostic' >&2\n"
-        'printf \'%s\\n\' \'[{"build_commit":"abc123","n_prompt":0,"n_gen":128,'
-        '"n_batch":512,"n_ubatch":256,"n_threads":10,"type_k":"f16",'
-        '"type_v":"f16","flash_attn":1,"n_gpu_layers":99,'
-        '"avg_ts":42.5,"stddev_ts":1.5,"samples_ts":[41.0,44.0]}]\'\n'
+        f"printf '%s\\n' '{output}'\n"
         f"exit {exit_code}\n",
         encoding="utf-8",
     )
     binary.chmod(0o755)
     return binary
+
+
+def _fixture_benchmark_row(tmp_path: Path) -> dict[str, object]:
+    return {
+        "build_commit": "abc123",
+        "n_prompt": 0,
+        "n_gen": 128,
+        "n_batch": 512,
+        "n_ubatch": 256,
+        "n_threads": 10,
+        "type_k": "f16",
+        "type_v": "f16",
+        "flash_attn": 1,
+        "n_gpu_layers": 99,
+        "n_cpu_moe": 0,
+        "use_mmap": True,
+        "no_kv_offload": False,
+        "model_filename": str(tmp_path / "model.gguf"),
+        "avg_ts": 42.5,
+        "stddev_ts": 2.12132,
+        "samples_ns": [3_121_951_220, 2_909_090_909],
+        "samples_ts": [41.0, 44.0],
+    }
 
 
 def _local_config(tmp_path: Path, binary: Path):
@@ -347,11 +413,16 @@ size_bytes = {len(model_content)}
 
 [runtime]
 binary = "{binary}"
+repetitions = 2
 capture_peak_memory = false
 
 [workload]
+prompt_tokens = []
+generation_tokens = [128]
 
 [matrix]
+batch_sizes = [512]
+ubatch_sizes = [256]
 
 [promotion]
 require_clean_repository = true

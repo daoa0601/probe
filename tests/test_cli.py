@@ -85,7 +85,14 @@ def test_sweep_executes_with_an_explicit_fixture_runtime(tmp_path: Path) -> None
     model.write_bytes(b"fixture")
     binary = tmp_path / "llama-bench"
     binary.write_text(
-        '#!/bin/sh\nprintf \'%s\\n\' \'[{"n_prompt":0,"n_gen":1,"avg_ts":1.0}]\'\n',
+        "#!/bin/sh\n"
+        "printf '%s\\n' '"
+        '[{"n_prompt":0,"n_gen":1,"n_batch":2048,"n_ubatch":512,'
+        '"n_threads":10,"n_gpu_layers":99,"n_cpu_moe":0,"flash_attn":1,'
+        '"type_k":"f16","type_v":"f16","use_mmap":true,"no_kv_offload":false,'
+        f'"model_filename":"{model}","avg_ts":1.0,"stddev_ts":0.0,'
+        '"samples_ns":[1000000000,1000000000,1000000000,1000000000,1000000000],'
+        '"samples_ts":[1.0,1.0,1.0,1.0,1.0]}]\'\n',
         encoding="utf-8",
     )
     binary.chmod(0o755)

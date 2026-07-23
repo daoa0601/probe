@@ -121,13 +121,15 @@ means are never averaged to manufacture agreement, and the tolerance cannot be w
 
 ## Promotion preflight
 
-The promotion-eligible 26B config is `configs/gemma4-26b-a4b-baseline-v2.toml`. Before artifact
-creation, Probe hashes the exact local model, checks its committed size and digest, captures Git
-HEAD/status/diff, rejects a dirty or unavailable repository, captures the host environment, rejects
-start load above the configured ceiling, and requires AC power when declared. This preflight is a
-guardrail, not a quality verdict. The runner then executes the copied correctness contract with the
-pinned companion `llama-cli`, requires exact parsed equality, and seals its command and raw streams
-alongside throughput evidence. Independent audit remains mandatory.
+The promotion-eligible configs are `configs/gemma4-26b-a4b-baseline-v2.toml` and
+`configs/gemma4-12b-baseline-v1.toml`. Before artifact creation, Probe hashes the exact local model,
+checks its committed size and digest, captures Git HEAD/status/diff, rejects a dirty or unavailable
+repository, captures the host environment, rejects start load above the configured ceiling, and
+requires AC power when declared. This preflight is a guardrail, not a quality verdict. The runner
+then requires llama-bench output to match the declared model, workload, parameter matrix, repetition
+count, token accounting, and sample aggregates. It executes the copied correctness contract with
+the pinned companion `llama-cli`, requires exact parsed equality, and seals its command and raw
+streams alongside throughput evidence. Independent audit remains mandatory.
 
 ## Durable custody
 

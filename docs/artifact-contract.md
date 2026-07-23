@@ -40,7 +40,9 @@ UUIDs, provisioning identifiers, usernames, and computer names, Probe does not r
 
 Failed processes still receive config, command, host, stdout, stderr, and manifest files. A malformed
 or incomplete benchmark is evidence about the feasible parameter region, but it never becomes a
-successful `results.jsonl` record.
+successful `results.jsonl` record. Successful parsing requires the exact declared workload and
+parameter matrix, model path, non-zero token counts, the configured number of positive raw samples,
+sample durations consistent with token throughput, and aggregates reproducible from those samples.
 
 `trace.jsonl` is written during execution rather than reconstructed afterward. Its ordered events
 cover artifact creation, source and model capture, an optional promotion contract, host and start

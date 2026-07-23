@@ -64,6 +64,10 @@ def test_capture_host_uses_injected_command_reader() -> None:
             return str(48 * 1024**3)
         if command[-1] == "hw.logicalcpu":
             return "14"
+        if command[-1] == "hw.perflevel0.physicalcpu":
+            return "10"
+        if command[-1] == "hw.perflevel1.physicalcpu":
+            return "4"
         return None
 
     host = capture_host(reader=reader)
@@ -79,3 +83,21 @@ def test_capture_host_uses_injected_command_reader() -> None:
 def test_malformed_profiler_payload_returns_no_fields() -> None:
     assert parse_system_profiler("not-json") == {}
     assert parse_system_profiler(None) == {}
+
+
+def test_system_profiler_parser_handles_current_processor_layout() -> None:
+    payload = json.dumps(
+        {
+            "SPHardwareDataType": [
+                {
+                    "number_processors": "proc 14:0:10:4",
+                }
+            ]
+        }
+    )
+
+    parsed = parse_system_profiler(payload)
+
+    assert parsed["logical_cpu_cores"] == 14
+    assert parsed["performance_cpu_cores"] == 10
+    assert parsed["efficiency_cpu_cores"] == 4

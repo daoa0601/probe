@@ -65,6 +65,8 @@ def capture_host(*, reader: CommandReader | None = None) -> HostSnapshot:
     if memory_bytes is None:
         memory_bytes = _fallback_memory_bytes()
     logical_cores = _parse_int(read(["sysctl", "-n", "hw.logicalcpu"])) or os.cpu_count() or 1
+    performance_cores = _parse_int(read(["sysctl", "-n", "hw.perflevel0.physicalcpu"]))
+    efficiency_cores = _parse_int(read(["sysctl", "-n", "hw.perflevel1.physicalcpu"]))
     mac_version = platform.mac_ver()[0]
     operating_system = platform.system()
 
@@ -79,8 +81,12 @@ def capture_host(*, reader: CommandReader | None = None) -> HostSnapshot:
         chip=_as_string(profiler.get("chip")),
         memory_bytes=memory_bytes,
         logical_cpu_cores=logical_cores,
-        performance_cpu_cores=_as_int(profiler.get("performance_cpu_cores")),
-        efficiency_cpu_cores=_as_int(profiler.get("efficiency_cpu_cores")),
+        performance_cpu_cores=performance_cores
+        if performance_cores is not None
+        else _as_int(profiler.get("performance_cpu_cores")),
+        efficiency_cpu_cores=efficiency_cores
+        if efficiency_cores is not None
+        else _as_int(profiler.get("efficiency_cpu_cores")),
         gpu_cores=_as_int(profiler.get("gpu_cores")),
         metal_support=_as_string(profiler.get("metal_support")),
         python_version=platform.python_version(),
@@ -209,10 +215,15 @@ def _first_mapping(value: Any) -> dict[str, Any]:
 def _parse_processor_counts(value: str | None) -> tuple[int | None, int | None, int | None]:
     if not value:
         return None, None, None
-    match = re.fullmatch(r"proc\s+(\d+):(\d+):(\d+):\d+", value.strip())
+    match = re.fullmatch(r"proc\s+(\d+):(\d+):(\d+):(\d+)", value.strip())
     if match is None:
         return None, None, None
-    return tuple(int(part) for part in match.groups())  # type: ignore[return-value]
+    total, first, second, third = (int(part) for part in match.groups())
+    if second + third == total:
+        return total, second, third
+    if first + second == total:
+        return total, first, second
+    return total, None, None
 
 
 def _parse_int(value: str | None) -> int | None:
