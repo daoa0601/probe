@@ -10,12 +10,18 @@
 namespace {
 
 constexpr NSUInteger kFunctionConstantMulMv = 600;
+constexpr NSUInteger kFunctionConstantFlash = 400;
+constexpr NSUInteger kFunctionConstantFlashReduce = 500;
+constexpr NSUInteger kFunctionConstantRope = 800;
 
 void print_usage(const char * program) {
     std::fprintf(
         stderr,
         "usage: %s METALLIB ARCHIVE FUNCTION NSG NE12 R2 R3\n"
-        "       NSG=0 loads an unspecialized function without Q4 constants\n",
+        "       NSG=0 loads an unspecialized function without Q4 constants\n"
+        "       flash-attention functions interpret the final four values as\n"
+        "       NSG NS10 NS20 NWG; its reduction interprets the first two as\n"
+        "       DV NWG\n",
         program);
 }
 
@@ -85,8 +91,79 @@ int main(int argc, const char * argv[]) {
         }
 
         id<MTLFunction> function = nil;
-        if (nsg == 0) {
+        const bool has_rope_constants =
+            [function_name rangeOfString:@"rope"].location != NSNotFound;
+        const bool has_flash_constants =
+            [function_name
+                rangeOfString:@"flash_attn_ext_vec_"].location != NSNotFound &&
+            [function_name
+                rangeOfString:@"flash_attn_ext_vec_reduce"].location ==
+                NSNotFound;
+        const bool has_flash_reduce_constants =
+            [function_name
+                rangeOfString:@"flash_attn_ext_vec_reduce"].location !=
+                NSNotFound;
+        if (has_flash_reduce_constants) {
+            const int32_t flash_dv = nsg;
+            const int32_t flash_nwg = ne12;
+            MTLFunctionConstantValues * constants =
+                [[MTLFunctionConstantValues alloc] init];
+            [constants setConstantValue:&flash_dv
+                                   type:MTLDataTypeInt
+                                atIndex:kFunctionConstantFlashReduce + 0];
+            [constants setConstantValue:&flash_nwg
+                                   type:MTLDataTypeInt
+                                atIndex:kFunctionConstantFlashReduce + 1];
+            function = [library newFunctionWithName:function_name
+                                      constantValues:constants
+                                               error:&error];
+        } else if (has_flash_constants) {
+            const bool true_value = true;
+            const bool false_value = false;
+            const int32_t flash_nsg = nsg;
+            const int32_t flash_ns10 = ne12;
+            const int32_t flash_ns20 = r2;
+            const int32_t flash_nwg = r3;
+            MTLFunctionConstantValues * constants =
+                [[MTLFunctionConstantValues alloc] init];
+            [constants setConstantValue:&true_value
+                                   type:MTLDataTypeBool
+                                atIndex:kFunctionConstantFlash + 0];
+            for (NSUInteger index = 1; index <= 4; ++index) {
+                [constants setConstantValue:&false_value
+                                       type:MTLDataTypeBool
+                                    atIndex:kFunctionConstantFlash + index];
+            }
+            [constants setConstantValue:&flash_ns10
+                                   type:MTLDataTypeInt
+                                atIndex:kFunctionConstantFlash + 20];
+            [constants setConstantValue:&flash_ns20
+                                   type:MTLDataTypeInt
+                                atIndex:kFunctionConstantFlash + 21];
+            [constants setConstantValue:&flash_nsg
+                                   type:MTLDataTypeInt
+                                atIndex:kFunctionConstantFlash + 22];
+            [constants setConstantValue:&flash_nwg
+                                   type:MTLDataTypeInt
+                                atIndex:kFunctionConstantFlash + 23];
+            function = [library newFunctionWithName:function_name
+                                      constantValues:constants
+                                               error:&error];
+        } else if (nsg == 0 && !has_rope_constants) {
             function = [library newFunctionWithName:function_name];
+        } else if (nsg == 0) {
+            const bool false_value = false;
+            MTLFunctionConstantValues * constants =
+                [[MTLFunctionConstantValues alloc] init];
+            [constants setConstantValue:&false_value
+                                   type:MTLDataTypeBool
+                                atIndex:kFunctionConstantRope + 0];
+            [constants setConstantValue:&false_value
+                                   type:MTLDataTypeBool
+                                atIndex:kFunctionConstantRope + 1];
+            function = [library newFunctionWithName:function_name
+                                      constantValues:constants
+                                               error:&error];
         } else {
             MTLFunctionConstantValues * constants = [[MTLFunctionConstantValues alloc] init];
             [constants setConstantValue:&nsg
@@ -152,6 +229,7 @@ int main(int argc, const char * argv[]) {
             "{"
             "\"device\":%s,"
             "\"function\":%s,"
+            "\"specialization\":%s,"
             "\"nsg\":%d,"
             "\"ne12\":%d,"
             "\"r2\":%d,"
@@ -164,6 +242,13 @@ int main(int argc, const char * argv[]) {
             "}\n",
             json_escape(device.name).UTF8String,
             json_escape(function_name).UTF8String,
+            json_escape(
+                has_flash_constants
+                    ? @"flash_attn_ext_vec"
+                    : (has_flash_reduce_constants
+                           ? @"flash_attn_ext_vec_reduce"
+                           : (has_rope_constants ? @"rope" : @"mul_mv")))
+                .UTF8String,
             nsg,
             ne12,
             r2,

@@ -1,13 +1,20 @@
 METAL_TOOL_SOURCES := \
 	tools/metal-archive-replay.mm \
 	tools/metal-counter-info.mm \
+	tools/metal-fattn-bench.mm \
+	tools/metal-kv-cache-bench.mm \
+	tools/metal-logit-softcap-bench.mm \
 	tools/metal-moe-reduce-bench.mm \
 	tools/metal-pipeline-archive.mm \
+	tools/metal-q4-down-norm-bench.mm \
 	tools/metal-q4-bench.mm \
-	tools/metal-q4-moe-bench.mm
+	tools/metal-q4-moe-bench.mm \
+	tools/metal-rms-rope-bench.mm
 METAL_TOOL_BINS := $(patsubst tools/%.mm,build/tools/%,$(METAL_TOOL_SOURCES))
 NATIVE_TOOL_SOURCES := tools/metal-native-patch.cpp
 NATIVE_TOOL_BINS := $(patsubst tools/%.cpp,build/tools/%,$(NATIVE_TOOL_SOURCES))
+GGUF_TOOL_SOURCES := tools/gguf-untie-output.cpp
+GGUF_TOOL_BINS := $(patsubst tools/%.cpp,build/tools/%,$(GGUF_TOOL_SOURCES))
 
 .PHONY: sync check test format doctor plan metal-tools
 
@@ -33,7 +40,17 @@ doctor:
 plan:
 	uv run probe sweep --dry-run configs/gemma4-26b-a4b-baseline.toml
 
-metal-tools: $(METAL_TOOL_BINS) $(NATIVE_TOOL_BINS)
+metal-tools: $(METAL_TOOL_BINS) $(NATIVE_TOOL_BINS) $(GGUF_TOOL_BINS)
+
+build/tools/gguf-untie-output: tools/gguf-untie-output.cpp
+	mkdir -p build/tools
+	xcrun clang++ -std=c++17 \
+		-I.cache/llama.cpp/ggml/include \
+		$< \
+		-L.cache/llama.cpp/build/bin \
+		-Wl,-rpath,@loader_path/../../.cache/llama.cpp/build/bin \
+		-lggml -lggml-cpu -lggml-base \
+		-o $@
 
 build/tools/%: tools/%.mm
 	mkdir -p build/tools

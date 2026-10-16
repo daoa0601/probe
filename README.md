@@ -61,16 +61,45 @@ improved decode throughput by 3.26% and 3.05%; a third load-skewed pair is not u
 The deterministic tool-call transcript stayed byte-identical. Gemma 4 12B is a 48-layer dense
 graph and intentionally does not select this MoE-only fusion.
 
+The current dense-decode hill climb is packaged as
+[`runtime/patches/0003-metal-gemma4-retained-decode-fusions.patch`](runtime/patches/0003-metal-gemma4-retained-decode-fusions.patch).
+It adds four M4 Pro-specific families: fused Q4_0 gate/up/GEGLU, fused Q4_0
+down-projection/RMS-norm/residual/scale, fused RMS/scale/RoPE with direct K/V cache writes, and a
+single-workgroup direct-output FlashAttention path for Gemma 4 cache lengths through 256 tokens.
+The FlashAttention cutoff is empirical: stabilized one-token GPU timestamps still improved by
+11.7% for the local head and 1.6% for the global head at 256 tokens, then regressed by 6.9% and
+23.8% at 288 tokens when a second serial cache pass became necessary. Every fusion has an
+environment-variable kill switch and exact shape/type/use-count guards. The individual
+end-to-end results are deliberately not added together; see
+[the Metal hill-climb record](docs/metal-hill-climb.md) for retained and pruned measurements. Four
+balanced all-enabled/all-disabled pairs improved 12B decode by 1.56%, 3.78%, 1.92%, and 4.12%;
+pooled throughput was 29.133 versus 28.329 tokens/s (+2.84%).
+
+[`runtime/patches/0004-metal-q4-nsg-control.patch`](runtime/patches/0004-metal-q4-nsg-control.patch)
+adds the bounded `GGML_METAL_Q4_NSG` control used to restore upstream NSG2 during those A/B runs.
+It does not change the default: M4 Pro remains on the retained NSG4 path, other Apple GPUs remain
+on the upstream selector, and invalid override values are ignored.
+
+The current 12B throughput frontier combines those retained Metal kernels with a separately
+quantized Q4_0 output head and Gemma 4's dedicated MTP assistant. Quantizing only `output.weight`
+from Q6_K to Q4_0 improved a balanced ten-sample decode comparison by 3.36%, while preserving the
+Q8_0 input embedding; its two-chunk quality result was KLD 0.003577, RMS probability delta 1.098%,
+and the same top token at 92.857% of positions. With two draft tokens and `p_min=0.995`, a
+three-task ABBA server comparison then measured 35.662 versus 31.823 tokens/s for MTP versus the
+same target alone: +12.065% mean and +9.926% median, with 95.98% draft acceptance and byte-identical
+final choices. These gains are separate experiments and are not added together. The complete
+kernel portfolio, native G16S evidence, rejected candidates, and measurement caveats are in the
+[Metal hill-climb record](docs/metal-hill-climb.md).
+
 Probe imports streaming SHA-256 and detached artifact-seal primitives from the sibling
 [`benchmark-audit-core`](../benchmark-audit-core/) package. Its model/runtime correctness checks,
 clean-source and start-environment gates, replication tolerance, and independent promotion verdict
 remain Probe-owned policy. Probe does not use the core's `evaluate_headline_gate()` result as its
 promotion verdict.
 
-The core is intentionally workspace-local, and this checkout resolves it through
-`../benchmark-audit-core`. A relocated Probe clone or CI job must provide that sibling source,
-vendor the same code, or use an explicitly pinned Git source. Regenerate and verify `uv.lock` when
-the source location changes.
+The core is resolved from the sibling checkout `../benchmark-audit-core`; CI checks it out next to
+Probe. See [the catalog README](../../README.md#cross-repo-boundaries) for the layout and
+cross-repo boundaries.
 
 ## Quick start
 
@@ -153,6 +182,8 @@ tests/               hardware-independent unit and CLI tests
 - [Official Gemma 4 26B-A4B QAT Q4_0 GGUF](https://huggingface.co/google/gemma-4-26B-A4B-it-qat-q4_0-gguf)
 - [llama.cpp Gemma 4 26B-A4B GGUF conversion](https://huggingface.co/ggml-org/gemma-4-26B-A4B-it-GGUF)
 - [llama.cpp Gemma 4 12B GGUF conversion](https://huggingface.co/ggml-org/gemma-4-12B-it-GGUF)
+- [Unsloth Gemma 4 12B QAT GGUF and smart assistant](https://huggingface.co/unsloth/gemma-4-12B-it-qat-GGUF)
+- [Fable Gemma 4 WebGPU kernel workspace](https://huggingface.co/spaces/webml-community/gemma-4-webgpu-kernels)
 - [`llama.cpp`](https://github.com/ggml-org/llama.cpp)
 
 Gemma 4 and its runtime support are evolving quickly. Probe pins every benchmarkable runtime and

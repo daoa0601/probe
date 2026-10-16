@@ -1,0 +1,47 @@
+diff --git a/ggml/src/ggml-metal/ggml-metal-ops.cpp b/ggml/src/ggml-metal/ggml-metal-ops.cpp
+index a8211806..08a3b16c 100644
+--- a/ggml/src/ggml-metal/ggml-metal-ops.cpp
++++ b/ggml/src/ggml-metal/ggml-metal-ops.cpp
+@@ -2487,6 +2487,21 @@ static int ggml_metal_op_mul_mat_q4_0_geglu_fused(ggml_metal_op_t ctx, int idx)
+     return 3;
+ }
+ 
++static int ggml_metal_q4_0_nsg(
++        const ggml_metal_device_props * props) {
++    int nsg =
++        props->device_id == GGML_METAL_DEVICE_M4_PRO
++            ? 4
++            : N_SG_Q4_0;
++    if (const char * value = getenv("GGML_METAL_Q4_NSG")) {
++        const int requested = atoi(value);
++        if (requested >= 1 && requested <= 8) {
++            nsg = requested;
++        }
++    }
++    return nsg;
++}
++
+ int ggml_metal_op_mul_mat(ggml_metal_op_t ctx, int idx) {
+     if (ctx->use_fusion &&
+         ggml_metal_op_can_fuse_q4_0_down_norm_add(ctx, idx)) {
+@@ -2677,8 +2692,9 @@ int ggml_metal_op_mul_mat(ggml_metal_op_t ctx, int idx) {
+ 
+         ggml_metal_encoder_dispatch_threadgroups(enc, ((ne11 + nr1 - 1) / nr1), ((ne01 + nr0 - 1) / nr0), ne12 * ne13, 32, nsg, 1);
+     } else {
+-        // The M4 Pro benefits from the extra Q4_0 occupancy during single-token decode.
+-        const int nsg_q4_0 = props_dev->device_id == GGML_METAL_DEVICE_M4_PRO ? 4 : N_SG_Q4_0;
++        // The M4 Pro benefits from the extra Q4_0 occupancy during
++        // single-token decode. Keep an override for controlled A/B tests.
++        const int nsg_q4_0 = ggml_metal_q4_0_nsg(props_dev);
+         auto pipeline = ggml_metal_library_get_pipeline_mul_mv(lib, op, nsg_q4_0);
+ 
+         const int nr0 = pipeline.nr0;
+@@ -2876,7 +2892,7 @@ int ggml_metal_op_mul_mat_id(ggml_metal_op_t ctx, int idx) {
+         }
+     } else {
+         // Keep the MoE path in sync with the dense Q4_0 mat-vec dispatch.
+-        const int nsg_q4_0 = props_dev->device_id == GGML_METAL_DEVICE_M4_PRO ? 4 : N_SG_Q4_0;
++        const int nsg_q4_0 = ggml_metal_q4_0_nsg(props_dev);
+         auto pipeline = ggml_metal_library_get_pipeline_mul_mv_id(lib, op, nsg_q4_0);
+ 
+         const int nr0 = pipeline.nr0;
