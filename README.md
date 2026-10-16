@@ -98,7 +98,7 @@ remain Probe-owned policy. Probe does not use the core's `evaluate_headline_gate
 promotion verdict.
 
 The core is resolved from the sibling checkout `../benchmark-audit-core`; CI checks it out next to
-Probe. See [the catalog README](../../README.md#cross-repo-boundaries) for the layout and
+Probe. See [the catalog README](https://github.com/daoa0601/agentic-orch/blob/main/README.md#cross-repo-boundaries) for the layout and
 cross-repo boundaries.
 
 ## Quick start
